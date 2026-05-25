@@ -14,7 +14,7 @@
       <p class="text-slate-600">
         Scans <strong>Nifty 50</strong> ({{ universe_size }} stocks) using strategies inspired by legendary traders:
         <em>Minervini</em>, <em>Kotegawa (BNF)</em>, <em>Darvas</em>, <em>Turtle (Dennis)</em>,
-        <em>Livermore</em>, <em>Zanger</em>, and <em>Qullamaggie</em>.
+        <em>Livermore</em>, <em>Zanger</em>, <em>Qullamaggie</em>, plus an authentic <em>BNF Classic</em>.
       </p>
       <p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mt-2">
         Educational tool only. Not financial advice. Always use a stop-loss. Never risk more than 2% of your capital per trade.
@@ -101,6 +101,7 @@ function strategyBadge(s) {
   const map = {
     minervini_lite:    { label: "Trend (Minervini)",    cls: "bg-emerald-100 text-emerald-800" },
     kotegawa_meanrev:  { label: "Mean Reversion (BNF)", cls: "bg-indigo-100 text-indigo-800" },
+    bnf_classic:       { label: "BNF Classic",          cls: "bg-violet-100 text-violet-800" },
     darvas_box:        { label: "Darvas Box",           cls: "bg-amber-100 text-amber-800" },
     turtle_breakout:   { label: "Turtle 20-day",        cls: "bg-lime-100 text-lime-800" },
     livermore_pivot:   { label: "Livermore Pivot",      cls: "bg-rose-100 text-rose-800" },

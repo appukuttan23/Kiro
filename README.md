@@ -14,12 +14,13 @@ having to pick stocks yourself.
 ## What it does
 
 1. **Scans all 50 Nifty 50 stocks** automatically — you don't pick.
-2. Applies **7 strategies inspired by legendary traders**:
+2. Applies **8 strategies inspired by legendary traders**:
 
    | Strategy | Inspired by | Type | Looks for |
    |---|---|---|---|
    | **Minervini-Lite** | Mark Minervini | Trend | Price above 50/150/200 SMAs, stacked correctly, 200-SMA rising |
-   | **Kotegawa 25-day** | Takashi Kotegawa (BNF) | Mean reversion | Price ≥ 5% below 25-SMA + RSI < 30, in long-term uptrend |
+   | **Kotegawa 25-day** | Takashi Kotegawa (BNF) | Mean reversion (light) | Price ≥ 5% below 25-SMA + RSI < 30, in long-term uptrend |
+   | **BNF Classic** | Takashi Kotegawa (authentic) | Mean reversion (strict) | Price ≥ 15% below 25-SMA on a fresh selloff in a liquid large-cap |
    | **Darvas Box** | Nicolas Darvas | Breakout | New 52-week high after 20 days in a tight (≤ 8%) box |
    | **Turtle 20-day** | Richard Dennis (Turtles) | Breakout | Close > prior 20-day high, in confirmed uptrend; 2× ATR stop |
    | **Livermore Pivot** | Jesse Livermore | Breakout | Break above prior 60-day pivot high on ≥ 1.5× volume |

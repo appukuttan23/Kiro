@@ -484,11 +484,91 @@ def qullamaggie_ep(ticker: str, df: pd.DataFrame) -> Optional[Signal]:
     return Signal(ticker, "qullamaggie_ep", "BUY", price, reason, score)
 
 
+# ============================================================
+# Strategy 8: BNF Classic 25-day Deviation (Takashi Kotegawa, authentic)
+# ============================================================
+
+def bnf_classic(ticker: str, df: pd.DataFrame) -> Optional[Signal]:
+    """Authentic BNF / Kotegawa setup - stricter than kotegawa_meanrev.
+
+    BNF's reported core rule was disarmingly simple: buy a liquid large-cap
+    when its price falls 15-20% below its 25-day moving average. The idea:
+    in liquid names, that level of dislocation is rare and tends to mean-
+    revert within days to a few weeks.
+
+    Differences from kotegawa_meanrev (which is a beginner-friendly version):
+      - 15% deviation threshold (vs 5%) - real panic, not modest dips
+      - Liquidity filter (>= 1M avg daily volume)
+      - Confirms the dislocation has just occurred (within last 3 days)
+        rather than being a slow grind down
+      - No RSI requirement (BNF reportedly didn't use it)
+      - Looser trend filter: price above 200-SMA OR within 30% of 52-week
+        high - allows correction-in-uptrend setups (his bread and butter)
+
+    Checks (all must be true):
+      A. Price >= 15% below the 25-day SMA
+      B. The big drop happened recently (price was within 5% of 25-SMA
+         within the last 15 trading days - i.e. this is a fresh selloff,
+         not a sustained downtrend)
+      C. Average daily volume over last 50 days >= 1,000,000 shares
+         (liquid name only)
+      D. Price still within 30% of its 52-week high (avoid falling knives)
+    """
+    if len(df) < 210 or "Volume" not in df.columns:
+        return None
+
+    close = df["Close"]
+    volume = df["Volume"]
+    price = float(close.iloc[-1])
+
+    sma25_series = _sma(close, 25)
+    sma25 = sma25_series.iloc[-1]
+    if pd.isna(sma25) or sma25 <= 0:
+        return None
+
+    deviation = (price / sma25) - 1.0           # negative = below 25-SMA
+    cond_a = deviation <= -0.15
+
+    # Was price recently near or above the 25-SMA? (fresh selloff check)
+    recent_window = (close.iloc[-15:] / sma25_series.iloc[-15:]) - 1.0
+    cond_b = bool((recent_window >= -0.05).any())
+
+    avg_vol_50 = float(volume.iloc[-50:].mean())
+    cond_c = avg_vol_50 >= 1_000_000
+
+    high_52w = float(close.iloc[-252:].max()) if len(close) >= 252 else float(close.max())
+    cond_d = price >= 0.70 * high_52w
+
+    if not (cond_a and cond_b and cond_c and cond_d):
+        return None
+
+    # Score: deeper dip + closer to recent high (faster panic) = stronger
+    pct_off_high = (high_52w - price) / high_52w
+    score = abs(deviation) + (1.0 - min(pct_off_high / 0.30, 1.0)) * 0.2
+
+    # Bounce target = back to the 25-SMA (BNF's typical exit zone)
+    target = float(sma25)
+    upside_pct = (target / price - 1) * 100
+
+    reason = (
+        f"BNF-classic dislocation: price Rs.{price:.1f} is "
+        f"{abs(deviation) * 100:.1f}% BELOW the 25-day average "
+        f"(Rs.{target:.1f}) - a textbook BNF setup. The drop is fresh "
+        f"(was near the 25-SMA within the last 15 days), and the stock "
+        f"is liquid (avg {avg_vol_50 / 1e6:.1f}M shares/day). Mean-"
+        f"reversion target: 25-SMA at Rs.{target:.1f} (+{upside_pct:.1f}%). "
+        f"Tight stop suggestion: today's low. Exit if price closes back "
+        f"below today's low or doesn't bounce within 5 trading days."
+    )
+    return Signal(ticker, "bnf_classic", "BUY", price, reason, score)
+
+
 # ---------- registry ----------
 
 ALL_STRATEGIES = {
     "minervini_lite":   minervini_lite,
     "kotegawa_meanrev": kotegawa_meanrev,
+    "bnf_classic":      bnf_classic,
     "darvas_box":       darvas_box,
     "turtle_breakout":  turtle_breakout,
     "livermore_pivot":  livermore_pivot,
