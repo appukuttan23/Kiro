@@ -81,28 +81,90 @@ Never lose more than 2% of your total capital on a single trade.
 ├── requirements.txt
 ├── README.md
 ├── .env.example             Template for Telegram bot config
+├── reports/                 Daily scan reports (auto-created, gitignored)
 ├── app/
 │   ├── __init__.py
-│   ├── main.py              FastAPI web app + routes
+│   ├── main.py              FastAPI web app + routes + lifespan-managed scheduler
+│   ├── scheduler.py         APScheduler that runs the daily scan
+│   ├── reports.py           Report generation + Markdown rendering
 │   ├── telegram_bot.py      Telegram bot (Phase 2)
 │   ├── universe.py          Nifty 50 tickers
 │   ├── data.py              yfinance data fetcher
-│   ├── strategies.py        Minervini-lite + Kotegawa
+│   ├── strategies.py        All 8 trader strategies
 │   └── paper_trades.py      JSON-backed paper trade log
 └── templates/
-    └── index.html           Dashboard UI
+    └── index.html           Dashboard UI (Scanner / Reports / Trades tabs)
 ```
 
 ---
 
 ## Roadmap (next steps)
 
-- [x] **Phase 1** — Web dashboard + paper trading
-- [x] **Phase 2** — Telegram bot with inline approval buttons
-- [ ] **Phase 3** — Real order placement via Zerodha Kite Connect (see below)
-- [ ] Daily auto-scan via cron / GitHub Actions
+- [x] **Phase 1** - Web dashboard + paper trading
+- [x] **Phase 2** - Telegram bot with inline approval buttons
+- [x] **Phase 2.5** - Background scheduler runs all 8 strategies daily; saved reports
+- [ ] **Phase 3** - Real order placement via Zerodha Kite Connect (see below)
 - [ ] More strategies: VWAP bounce, Stan Weinstein Stage 2, Linda Raschke "Holy Grail"
 - [ ] Backtest engine
+
+---
+
+## Background Scheduler &amp; Daily Reports
+
+The app runs all 8 strategies automatically on a schedule and saves a report
+each time. You can review past reports any day, see which strategies fired,
+and click any candidate to paper-buy.
+
+### Default schedule
+
+- **When:** Weekdays at **16:00 IST** (30 minutes after NSE close at 15:30).
+- **What it does:** Pulls 1 year of OHLCV for each Nifty 50 ticker, runs all 8
+  strategies, ranks signals by score, and saves the result.
+- **Where reports go:** `reports/&lt;scan_id&gt;.json` and `reports/&lt;scan_id&gt;.md`
+  next to the project root. (Both files are gitignored.)
+
+### Configure the schedule
+
+Set these in your `.env` file:
+
+```bash
+SCAN_SCHEDULE_HOUR=16        # 0-23
+SCAN_SCHEDULE_MINUTE=0       # 0-59
+SCAN_SCHEDULE_DAYS=mon-fri   # APScheduler cron day_of_week
+RUN_SCAN_ON_STARTUP=false    # set to 'true' to scan immediately on app start
+```
+
+### Manual control
+
+In the **Reports** tab of the dashboard you can:
+
+- See **next scheduled run** and **last actual run** at the top.
+- Click **Run scan now &amp; save report** to trigger a scan immediately.
+- Click any past report to expand: top picks, per-strategy hits, plain-English
+  reasons, and Paper Buy buttons.
+
+### API endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET`  | `/api/scheduler/status`     | Next/last run, whether a scan is in progress |
+| `POST` | `/api/scan/run-now`         | Trigger a background scan now; returns the saved report |
+| `GET`  | `/api/reports?limit=30`     | List recent report summaries |
+| `GET`  | `/api/reports/{scan_id}`    | Fetch one full report |
+| `GET`  | `/api/scan`                 | One-off scan returning signals (does NOT save a report) |
+
+### Important
+
+The scheduler runs **inside the FastAPI process**. So for the daily scan to
+fire, the server must be up at the scheduled time. Easy hosting options:
+
+- A small always-on VM (Oracle Free Tier, AWS t4g.nano, Hetzner CX11, etc).
+- A free-tier container (Render, Fly.io) with a keep-alive ping.
+- A home Raspberry Pi that runs `uvicorn` on boot.
+
+If you'd rather not host anything, you can use **GitHub Actions cron** to call
+`POST /api/scan/run-now` against a deployed app, or run `python -m app.scheduler`
+on a cron job locally. (Tell me if you want either of these wired in.)
 
 ---
 
