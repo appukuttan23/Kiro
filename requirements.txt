@@ -1,0 +1,8 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+yfinance==0.2.44
+pandas==2.2.2
+numpy==1.26.4
+jinja2==3.1.4
+python-telegram-bot==21.6
+python-dotenv==1.0.1

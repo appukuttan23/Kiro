@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Indian Trading Alerts (Beginner MVP)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen">
+  <div class="max-w-5xl mx-auto p-6">
+
+    <header class="mb-6">
+      <h1 class="text-3xl font-bold">Indian Trading Alerts</h1>
+      <p class="text-slate-600">
+        Scans <strong>Nifty 50</strong> ({{ universe_size }} stocks) using two beginner-friendly strategies:
+        <em>Minervini-Lite Trend</em> and <em>Kotegawa 25-day Mean Reversion</em>.
+      </p>
+      <p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mt-2">
+        Educational tool only. Not financial advice. Always use a stop-loss. Never risk more than 2% of your capital per trade.
+      </p>
+    </header>
+
+    <nav class="flex gap-2 border-b border-slate-200 mb-4">
+      <button data-tab="scan"   class="tab px-4 py-2 border-b-2 border-blue-600 font-semibold">Scanner</button>
+      <button data-tab="trades" class="tab px-4 py-2 border-b-2 border-transparent text-slate-600">Paper Trades</button>
+    </nav>
+
+    <!-- Scanner tab -->
+    <section id="tab-scan">
+      <div class="flex items-center gap-3 mb-4">
+        <button id="scanBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded">
+          Scan Nifty 50
+        </button>
+        <span id="status" class="text-slate-500 text-sm"></span>
+      </div>
+      <div id="signals" class="space-y-3"></div>
+    </section>
+
+    <!-- Trades tab -->
+    <section id="tab-trades" class="hidden">
+      <div class="flex items-center gap-3 mb-4">
+        <button id="refreshTrades" class="bg-slate-600 hover:bg-slate-700 text-white font-semibold px-4 py-2 rounded">
+          Refresh
+        </button>
+      </div>
+      <div id="trades" class="space-y-2"></div>
+    </section>
+  </div>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
+
+// --- tabs ---
+$$(".tab").forEach(btn => btn.addEventListener("click", () => {
+  $$(".tab").forEach(b => {
+    b.classList.remove("border-blue-600", "font-semibold");
+    b.classList.add("border-transparent", "text-slate-600");
+  });
+  btn.classList.add("border-blue-600", "font-semibold");
+  btn.classList.remove("border-transparent", "text-slate-600");
+
+  $("#tab-scan").classList.toggle("hidden", btn.dataset.tab !== "scan");
+  $("#tab-trades").classList.toggle("hidden", btn.dataset.tab !== "trades");
+  if (btn.dataset.tab === "trades") loadTrades();
+}));
+
+// --- notifications ---
+async function ensureNotifyPermission() {
+  if (!("Notification" in window)) return false;
+  if (Notification.permission === "granted") return true;
+  if (Notification.permission === "denied") return false;
+  const p = await Notification.requestPermission();
+  return p === "granted";
+}
+
+function notify(title, body) {
+  if (Notification.permission === "granted") {
+    new Notification(title, { body });
+  }
+}
+
+// --- scan ---
+$("#scanBtn").addEventListener("click", async () => {
+  await ensureNotifyPermission();
+  $("#status").textContent = "Scanning... this can take ~30 seconds.";
+  $("#signals").innerHTML = "";
+  try {
+    const res = await fetch("/api/scan");
+    const data = await res.json();
+    renderSignals(data.signals);
+    $("#status").textContent = `Found ${data.count} candidate(s).`;
+    if (data.count > 0) notify("Trading Alerts", `${data.count} candidate(s) found in Nifty 50.`);
+  } catch (e) {
+    $("#status").textContent = "Scan failed: " + e.message;
+  }
+});
+
+function strategyBadge(s) {
+  const map = {
+    minervini_lite:    { label: "Trend (Minervini)",    cls: "bg-emerald-100 text-emerald-800" },
+    kotegawa_meanrev:  { label: "Mean Reversion (BNF)", cls: "bg-indigo-100 text-indigo-800" },
+  };
+  const m = map[s] || { label: s, cls: "bg-slate-100 text-slate-800" };
+  return `<span class="text-xs font-semibold px-2 py-1 rounded ${m.cls}">${m.label}</span>`;
+}
+
+function renderSignals(signals) {
+  if (!signals.length) {
+    $("#signals").innerHTML = `<div class="text-slate-500 italic">No candidates today. That's OK — the best traders sit out most days.</div>`;
+    return;
+  }
+  $("#signals").innerHTML = signals.map(s => `
+    <div class="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-2">
+          <span class="text-lg font-bold">${s.display}</span>
+          <span class="text-slate-500 text-sm">${s.ticker}</span>
+          ${strategyBadge(s.strategy)}
+        </div>
+        <div class="text-right">
+          <div class="text-lg font-semibold">₹${s.price.toFixed(2)}</div>
+        </div>
+      </div>
+      <p class="text-sm text-slate-700 mb-3">${s.reason}</p>
+      <div class="flex items-center gap-2">
+        <input type="number" min="1" value="10" data-qty="${s.ticker}"
+               class="border border-slate-300 rounded px-2 py-1 w-24 text-sm" />
+        <button data-buy="${s.ticker}" data-price="${s.price}" data-reason="${encodeURIComponent(s.reason)}"
+                class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-3 py-1 rounded">
+          Paper Buy
+        </button>
+      </div>
+    </div>
+  `).join("");
+
+  $$("[data-buy]").forEach(btn => btn.addEventListener("click", async () => {
+    const ticker = btn.dataset.buy;
+    const price = parseFloat(btn.dataset.price);
+    const reason = decodeURIComponent(btn.dataset.reason);
+    const qty = parseInt($(`[data-qty="${ticker}"]`).value, 10) || 1;
+    const res = await fetch("/api/trades", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker, action: "BUY", price, qty, reason }),
+    });
+    if (res.ok) {
+      btn.textContent = "Logged ✓";
+      btn.disabled = true;
+      btn.classList.remove("bg-emerald-600", "hover:bg-emerald-700");
+      btn.classList.add("bg-slate-400");
+    }
+  }));
+}
+
+// --- paper trades ---
+$("#refreshTrades").addEventListener("click", loadTrades);
+
+async function loadTrades() {
+  const res = await fetch("/api/trades");
+  const data = await res.json();
+  if (!data.trades.length) {
+    $("#trades").innerHTML = `<div class="text-slate-500 italic">No paper trades yet. Run a scan and paper-buy a candidate.</div>`;
+    return;
+  }
+  $("#trades").innerHTML = data.trades.map(t => `
+    <div class="bg-white border border-slate-200 rounded p-3 flex items-center justify-between">
+      <div>
+        <div><strong>${t.ticker.replace('.NS','')}</strong>
+          <span class="ml-1 text-xs px-2 py-0.5 rounded ${t.status === 'OPEN' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}">${t.status}</span>
+        </div>
+        <div class="text-xs text-slate-500">${t.ts} • ${t.action} ${t.qty} @ ₹${t.price}</div>
+      </div>
+      <div class="text-right">
+        ${t.status === 'OPEN'
+          ? `<button data-close="${t.id}" class="text-sm text-blue-700 underline">Close at current price</button>`
+          : `<div class="font-semibold ${t.pnl >= 0 ? 'text-emerald-700' : 'text-red-700'}">P&L: ₹${t.pnl} (${t.pnl_pct}%)</div>`}
+      </div>
+    </div>
+  `).join("");
+
+  $$("[data-close]").forEach(btn => btn.addEventListener("click", async () => {
+    const id = btn.dataset.close;
+    const px = prompt("Exit price (₹):");
+    if (!px) return;
+    const res = await fetch(`/api/trades/${id}/close`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ exit_price: parseFloat(px) }),
+    });
+    if (res.ok) loadTrades();
+  }));
+}
+</script>
+</body>
+</html>
