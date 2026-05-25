@@ -14,17 +14,24 @@ having to pick stocks yourself.
 ## What it does
 
 1. **Scans all 50 Nifty 50 stocks** automatically — you don't pick.
-2. Applies two well-known strategies:
-   - **Minervini-Lite Trend Template** (momentum / trend-following)
-     - Price > 50-day, 150-day, 200-day SMA
-     - 50 SMA > 150 SMA > 200 SMA
-     - 200 SMA trending up
-   - **Kotegawa 25-day Mean Reversion** (buy-the-dip)
-     - Price > 5% below 25-day SMA
-     - RSI(14) < 30
+2. Applies **8 strategies inspired by legendary traders**:
+
+   | Strategy | Inspired by | Type | Looks for |
+   |---|---|---|---|
+   | **Minervini-Lite** | Mark Minervini | Trend | Price above 50/150/200 SMAs, stacked correctly, 200-SMA rising |
+   | **Kotegawa 25-day** | Takashi Kotegawa (BNF) | Mean reversion (light) | Price ≥ 5% below 25-SMA + RSI < 30, in long-term uptrend |
+   | **BNF Classic** | Takashi Kotegawa (authentic) | Mean reversion (strict) | Price ≥ 15% below 25-SMA on a fresh selloff in a liquid large-cap |
+   | **Darvas Box** | Nicolas Darvas | Breakout | New 52-week high after 20 days in a tight (≤ 8%) box |
+   | **Turtle 20-day** | Richard Dennis (Turtles) | Breakout | Close > prior 20-day high, in confirmed uptrend; 2× ATR stop |
+   | **Livermore Pivot** | Jesse Livermore | Breakout | Break above prior 60-day pivot high on ≥ 1.5× volume |
+   | **Zanger Volume** | Dan Zanger | Breakout | Momentum leader (+30% YoY) breaks tight 2-month base on 2× volume |
+   | **Episodic Pivot** | Kristjan Kullamägi (Qullamaggie) | Catalyst | After +20% in 3 months: 4%+ gap-up that holds, on 2× volume |
+
 3. Shows you **only a handful of candidates per day** (no overwhelm).
-4. Gives a **plain-English reason** for every alert.
+4. Gives a **plain-English reason** (with stop-loss suggestions) for every alert.
 5. Lets you **log paper trades** to practice without real money.
+
+> **Tip:** Different strategies fire in different market conditions. **Trend** and **Breakout** strategies (Minervini, Darvas, Turtle, Livermore, Zanger, Qullamaggie) tend to fire in healthy bull markets. **Mean reversion** (Kotegawa) tends to fire after sharp selloffs. Don't be surprised if a scan returns zero candidates — the best traders sit out most days.
 
 ---
 
@@ -74,28 +81,90 @@ Never lose more than 2% of your total capital on a single trade.
 ├── requirements.txt
 ├── README.md
 ├── .env.example             Template for Telegram bot config
+├── reports/                 Daily scan reports (auto-created, gitignored)
 ├── app/
 │   ├── __init__.py
-│   ├── main.py              FastAPI web app + routes
+│   ├── main.py              FastAPI web app + routes + lifespan-managed scheduler
+│   ├── scheduler.py         APScheduler that runs the daily scan
+│   ├── reports.py           Report generation + Markdown rendering
 │   ├── telegram_bot.py      Telegram bot (Phase 2)
 │   ├── universe.py          Nifty 50 tickers
 │   ├── data.py              yfinance data fetcher
-│   ├── strategies.py        Minervini-lite + Kotegawa
+│   ├── strategies.py        All 8 trader strategies
 │   └── paper_trades.py      JSON-backed paper trade log
 └── templates/
-    └── index.html           Dashboard UI
+    └── index.html           Dashboard UI (Scanner / Reports / Trades tabs)
 ```
 
 ---
 
 ## Roadmap (next steps)
 
-- [x] **Phase 1** — Web dashboard + paper trading
-- [x] **Phase 2** — Telegram bot with inline approval buttons
-- [ ] **Phase 3** — Real order placement via Zerodha Kite Connect (see below)
-- [ ] Daily auto-scan via cron / GitHub Actions
-- [ ] More strategies: Darvas Box, VWAP bounce
+- [x] **Phase 1** - Web dashboard + paper trading
+- [x] **Phase 2** - Telegram bot with inline approval buttons
+- [x] **Phase 2.5** - Background scheduler runs all 8 strategies daily; saved reports
+- [ ] **Phase 3** - Real order placement via Zerodha Kite Connect (see below)
+- [ ] More strategies: VWAP bounce, Stan Weinstein Stage 2, Linda Raschke "Holy Grail"
 - [ ] Backtest engine
+
+---
+
+## Background Scheduler &amp; Daily Reports
+
+The app runs all 8 strategies automatically on a schedule and saves a report
+each time. You can review past reports any day, see which strategies fired,
+and click any candidate to paper-buy.
+
+### Default schedule
+
+- **When:** Weekdays at **16:00 IST** (30 minutes after NSE close at 15:30).
+- **What it does:** Pulls 1 year of OHLCV for each Nifty 50 ticker, runs all 8
+  strategies, ranks signals by score, and saves the result.
+- **Where reports go:** `reports/&lt;scan_id&gt;.json` and `reports/&lt;scan_id&gt;.md`
+  next to the project root. (Both files are gitignored.)
+
+### Configure the schedule
+
+Set these in your `.env` file:
+
+```bash
+SCAN_SCHEDULE_HOUR=16        # 0-23
+SCAN_SCHEDULE_MINUTE=0       # 0-59
+SCAN_SCHEDULE_DAYS=mon-fri   # APScheduler cron day_of_week
+RUN_SCAN_ON_STARTUP=false    # set to 'true' to scan immediately on app start
+```
+
+### Manual control
+
+In the **Reports** tab of the dashboard you can:
+
+- See **next scheduled run** and **last actual run** at the top.
+- Click **Run scan now &amp; save report** to trigger a scan immediately.
+- Click any past report to expand: top picks, per-strategy hits, plain-English
+  reasons, and Paper Buy buttons.
+
+### API endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET`  | `/api/scheduler/status`     | Next/last run, whether a scan is in progress |
+| `POST` | `/api/scan/run-now`         | Trigger a background scan now; returns the saved report |
+| `GET`  | `/api/reports?limit=30`     | List recent report summaries |
+| `GET`  | `/api/reports/{scan_id}`    | Fetch one full report |
+| `GET`  | `/api/scan`                 | One-off scan returning signals (does NOT save a report) |
+
+### Important
+
+The scheduler runs **inside the FastAPI process**. So for the daily scan to
+fire, the server must be up at the scheduled time. Easy hosting options:
+
+- A small always-on VM (Oracle Free Tier, AWS t4g.nano, Hetzner CX11, etc).
+- A free-tier container (Render, Fly.io) with a keep-alive ping.
+- A home Raspberry Pi that runs `uvicorn` on boot.
+
+If you'd rather not host anything, you can use **GitHub Actions cron** to call
+`POST /api/scan/run-now` against a deployed app, or run `python -m app.scheduler`
+on a cron job locally. (Tell me if you want either of these wired in.)
 
 ---
 

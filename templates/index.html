@@ -12,8 +12,9 @@
     <header class="mb-6">
       <h1 class="text-3xl font-bold">Indian Trading Alerts</h1>
       <p class="text-slate-600">
-        Scans <strong>Nifty 50</strong> ({{ universe_size }} stocks) using two beginner-friendly strategies:
-        <em>Minervini-Lite Trend</em> and <em>Kotegawa 25-day Mean Reversion</em>.
+        Scans <strong>Nifty 50</strong> ({{ universe_size }} stocks) using strategies inspired by legendary traders:
+        <em>Minervini</em>, <em>Kotegawa (BNF)</em>, <em>Darvas</em>, <em>Turtle (Dennis)</em>,
+        <em>Livermore</em>, <em>Zanger</em>, <em>Qullamaggie</em>, plus an authentic <em>BNF Classic</em>.
       </p>
       <p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mt-2">
         Educational tool only. Not financial advice. Always use a stop-loss. Never risk more than 2% of your capital per trade.
@@ -21,19 +22,51 @@
     </header>
 
     <nav class="flex gap-2 border-b border-slate-200 mb-4">
-      <button data-tab="scan"   class="tab px-4 py-2 border-b-2 border-blue-600 font-semibold">Scanner</button>
-      <button data-tab="trades" class="tab px-4 py-2 border-b-2 border-transparent text-slate-600">Paper Trades</button>
+      <button data-tab="scan"    class="tab px-4 py-2 border-b-2 border-blue-600 font-semibold">Scanner</button>
+      <button data-tab="reports" class="tab px-4 py-2 border-b-2 border-transparent text-slate-600">Reports</button>
+      <button data-tab="trades"  class="tab px-4 py-2 border-b-2 border-transparent text-slate-600">Paper Trades</button>
     </nav>
 
     <!-- Scanner tab -->
     <section id="tab-scan">
       <div class="flex items-center gap-3 mb-4">
         <button id="scanBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded">
-          Scan Nifty 50
+          Quick Scan (no report)
         </button>
         <span id="status" class="text-slate-500 text-sm"></span>
       </div>
       <div id="signals" class="space-y-3"></div>
+    </section>
+
+    <!-- Reports tab -->
+    <section id="tab-reports" class="hidden">
+      <div class="bg-white border border-slate-200 rounded-lg p-4 mb-4">
+        <div class="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <div class="font-semibold text-slate-900">Background scheduler</div>
+            <div id="schedulerStatus" class="text-sm text-slate-600">Loading status...</div>
+          </div>
+          <div class="flex gap-2">
+            <button id="refreshSchedBtn" class="bg-slate-200 hover:bg-slate-300 text-slate-800 text-sm font-semibold px-3 py-2 rounded">
+              Refresh
+            </button>
+            <button id="runNowBtn" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-3 py-2 rounded">
+              Run scan now &amp; save report
+            </button>
+          </div>
+        </div>
+        <p id="runNowStatus" class="text-xs text-slate-500 mt-2"></p>
+      </div>
+
+      <div id="reportsExitsBox" class="hidden mb-6">
+        <h2 class="text-lg font-semibold mb-2 text-rose-700">SELL alerts on your open trades (live)</h2>
+        <div id="reportsExitAlerts" class="space-y-2"></div>
+      </div>
+
+      <h2 class="text-lg font-semibold mb-2">Recent reports</h2>
+      <div id="reportsList" class="space-y-2"></div>
+
+      <div id="reportDetail" class="hidden mt-6"></div>
     </section>
 
     <!-- Trades tab -->
@@ -42,7 +75,15 @@
         <button id="refreshTrades" class="bg-slate-600 hover:bg-slate-700 text-white font-semibold px-4 py-2 rounded">
           Refresh
         </button>
+        <span id="tradesStatus" class="text-slate-500 text-sm"></span>
       </div>
+
+      <div id="exitAlertsBox" class="hidden mb-6">
+        <h2 class="text-lg font-semibold mb-2 text-rose-700">SELL alerts on your open trades</h2>
+        <div id="exitAlerts" class="space-y-2"></div>
+      </div>
+
+      <h2 class="text-lg font-semibold mb-2">All paper trades</h2>
       <div id="trades" class="space-y-2"></div>
     </section>
   </div>
@@ -50,6 +91,23 @@
 <script>
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
+
+// --- shared strategy badges ---
+const STRATEGY_MAP = {
+  minervini_lite:    { label: "Trend (Minervini)",    cls: "bg-emerald-100 text-emerald-800" },
+  kotegawa_meanrev:  { label: "Mean Reversion (BNF)", cls: "bg-indigo-100 text-indigo-800" },
+  bnf_classic:       { label: "BNF Classic",          cls: "bg-violet-100 text-violet-800" },
+  darvas_box:        { label: "Darvas Box",           cls: "bg-amber-100 text-amber-800" },
+  turtle_breakout:   { label: "Turtle 20-day",        cls: "bg-lime-100 text-lime-800" },
+  livermore_pivot:   { label: "Livermore Pivot",      cls: "bg-rose-100 text-rose-800" },
+  zanger_breakout:   { label: "Zanger Volume",        cls: "bg-fuchsia-100 text-fuchsia-800" },
+  qullamaggie_ep:    { label: "Episodic Pivot (QM)",  cls: "bg-cyan-100 text-cyan-800" },
+};
+
+function strategyBadge(s) {
+  const m = STRATEGY_MAP[s] || { label: s, cls: "bg-slate-100 text-slate-800" };
+  return `<span class="text-xs font-semibold px-2 py-1 rounded ${m.cls}">${m.label}</span>`;
+}
 
 // --- tabs ---
 $$(".tab").forEach(btn => btn.addEventListener("click", () => {
@@ -60,9 +118,12 @@ $$(".tab").forEach(btn => btn.addEventListener("click", () => {
   btn.classList.add("border-blue-600", "font-semibold");
   btn.classList.remove("border-transparent", "text-slate-600");
 
-  $("#tab-scan").classList.toggle("hidden", btn.dataset.tab !== "scan");
-  $("#tab-trades").classList.toggle("hidden", btn.dataset.tab !== "trades");
-  if (btn.dataset.tab === "trades") loadTrades();
+  const tab = btn.dataset.tab;
+  $("#tab-scan").classList.toggle("hidden", tab !== "scan");
+  $("#tab-reports").classList.toggle("hidden", tab !== "reports");
+  $("#tab-trades").classList.toggle("hidden", tab !== "trades");
+  if (tab === "trades")  loadTrades();
+  if (tab === "reports") { loadSchedulerStatus(); loadReports(); loadLiveExits(); }
 }));
 
 // --- notifications ---
@@ -73,92 +134,332 @@ async function ensureNotifyPermission() {
   const p = await Notification.requestPermission();
   return p === "granted";
 }
-
 function notify(title, body) {
-  if (Notification.permission === "granted") {
-    new Notification(title, { body });
-  }
+  if (Notification.permission === "granted") new Notification(title, { body });
 }
 
-// --- scan ---
+// --- Quick scan (no report) ---
 $("#scanBtn").addEventListener("click", async () => {
   await ensureNotifyPermission();
-  $("#status").textContent = "Scanning... this can take ~30 seconds.";
+  $("#status").textContent = "Scanning... ~30s.";
   $("#signals").innerHTML = "";
   try {
     const res = await fetch("/api/scan");
     const data = await res.json();
     renderSignals(data.signals);
     $("#status").textContent = `Found ${data.count} candidate(s).`;
-    if (data.count > 0) notify("Trading Alerts", `${data.count} candidate(s) found in Nifty 50.`);
+    if (data.count > 0) notify("Trading Alerts", `${data.count} candidate(s) found.`);
   } catch (e) {
     $("#status").textContent = "Scan failed: " + e.message;
   }
 });
 
-function strategyBadge(s) {
-  const map = {
-    minervini_lite:    { label: "Trend (Minervini)",    cls: "bg-emerald-100 text-emerald-800" },
-    kotegawa_meanrev:  { label: "Mean Reversion (BNF)", cls: "bg-indigo-100 text-indigo-800" },
-  };
-  const m = map[s] || { label: s, cls: "bg-slate-100 text-slate-800" };
-  return `<span class="text-xs font-semibold px-2 py-1 rounded ${m.cls}">${m.label}</span>`;
-}
-
 function renderSignals(signals) {
   if (!signals.length) {
-    $("#signals").innerHTML = `<div class="text-slate-500 italic">No candidates today. That's OK — the best traders sit out most days.</div>`;
+    $("#signals").innerHTML = `<div class="text-slate-500 italic">No candidates today. The best traders sit out most days.</div>`;
     return;
   }
-  $("#signals").innerHTML = signals.map(s => `
+  $("#signals").innerHTML = signals.map(s => signalCard(s, true)).join("");
+  $$("[data-buy]").forEach(btn => btn.addEventListener("click", paperBuyHandler));
+}
+
+function signalCard(s, withBuyButton) {
+  return `
     <div class="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
       <div class="flex items-center justify-between mb-2">
         <div class="flex items-center gap-2">
           <span class="text-lg font-bold">${s.display}</span>
           <span class="text-slate-500 text-sm">${s.ticker}</span>
           ${strategyBadge(s.strategy)}
+          <span class="text-xs text-slate-500">score ${Number(s.score).toFixed(2)}</span>
         </div>
         <div class="text-right">
-          <div class="text-lg font-semibold">₹${s.price.toFixed(2)}</div>
+          <div class="text-lg font-semibold">&#8377;${Number(s.price).toFixed(2)}</div>
         </div>
       </div>
       <p class="text-sm text-slate-700 mb-3">${s.reason}</p>
+      ${withBuyButton ? `
       <div class="flex items-center gap-2">
-        <input type="number" min="1" value="10" data-qty="${s.ticker}"
+        <input type="number" min="1" value="10" data-qty="${s.ticker}-${s.strategy}"
                class="border border-slate-300 rounded px-2 py-1 w-24 text-sm" />
-        <button data-buy="${s.ticker}" data-price="${s.price}" data-reason="${encodeURIComponent(s.reason)}"
+        <button data-buy="${s.ticker}-${s.strategy}" data-ticker="${s.ticker}"
+                data-strategy="${s.strategy}"
+                data-price="${s.price}" data-reason="${encodeURIComponent(s.reason)}"
                 class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-3 py-1 rounded">
           Paper Buy
         </button>
-      </div>
-    </div>
-  `).join("");
-
-  $$("[data-buy]").forEach(btn => btn.addEventListener("click", async () => {
-    const ticker = btn.dataset.buy;
-    const price = parseFloat(btn.dataset.price);
-    const reason = decodeURIComponent(btn.dataset.reason);
-    const qty = parseInt($(`[data-qty="${ticker}"]`).value, 10) || 1;
-    const res = await fetch("/api/trades", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticker, action: "BUY", price, qty, reason }),
-    });
-    if (res.ok) {
-      btn.textContent = "Logged ✓";
-      btn.disabled = true;
-      btn.classList.remove("bg-emerald-600", "hover:bg-emerald-700");
-      btn.classList.add("bg-slate-400");
-    }
-  }));
+      </div>` : ""}
+    </div>`;
 }
 
-// --- paper trades ---
+async function paperBuyHandler(e) {
+  const btn = e.currentTarget;
+  const key = btn.dataset.buy;
+  const ticker = btn.dataset.ticker;
+  const strategy = btn.dataset.strategy || "";
+  const price = parseFloat(btn.dataset.price);
+  const reason = decodeURIComponent(btn.dataset.reason);
+  const qty = parseInt($(`[data-qty="${key}"]`).value, 10) || 1;
+  const res = await fetch("/api/trades", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ticker, action: "BUY", price, qty, reason, strategy }),
+  });
+  if (res.ok) {
+    btn.textContent = "Logged \u2713";
+    btn.disabled = true;
+    btn.classList.remove("bg-emerald-600", "hover:bg-emerald-700");
+    btn.classList.add("bg-slate-400");
+  }
+}
+
+// --- SELL alert rendering ---
+const EXIT_TYPE_STYLE = {
+  STOP:        "bg-red-100 text-red-800 border-red-300",
+  TARGET:      "bg-emerald-100 text-emerald-800 border-emerald-300",
+  TIME:        "bg-amber-100 text-amber-800 border-amber-300",
+  TREND_BREAK: "bg-orange-100 text-orange-800 border-orange-300",
+};
+
+function exitAlertCard(ex) {
+  const style = EXIT_TYPE_STYLE[ex.exit_type] || "bg-slate-100 text-slate-800 border-slate-300";
+  const ticker = ex.ticker.replace(".NS", "");
+  const pnlCls = ex.pnl_pct >= 0 ? "text-emerald-700" : "text-red-700";
+  return `
+    <div class="bg-white border ${style.split(" ").pop()} rounded-lg p-4 shadow-sm">
+      <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-lg font-bold">${ticker}</span>
+          ${strategyBadge(ex.strategy)}
+          <span class="text-xs font-semibold px-2 py-1 rounded ${style}">SELL - ${ex.exit_type}</span>
+        </div>
+        <div class="text-right text-sm">
+          <div>Entry &#8377;${Number(ex.entry_price).toFixed(2)} &rarr; Now &#8377;${Number(ex.current_price).toFixed(2)}</div>
+          <div class="font-semibold ${pnlCls}">P&amp;L: ${ex.pnl_pct >= 0 ? "+" : ""}${ex.pnl_pct.toFixed(2)}%</div>
+        </div>
+      </div>
+      <p class="text-sm text-slate-700 mb-3">${ex.reason}</p>
+      <button data-close-exit="${ex.trade_id}" data-price="${ex.current_price}"
+              class="bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold px-3 py-1 rounded">
+        Close paper trade @ &#8377;${Number(ex.current_price).toFixed(2)}
+      </button>
+    </div>`;
+}
+
+async function attachExitCloseHandlers(rootSelector) {
+  const root = $(rootSelector);
+  if (!root) return;
+  root.querySelectorAll("[data-close-exit]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.closeExit;
+      const px = parseFloat(btn.dataset.price);
+      const res = await fetch(`/api/trades/${id}/close`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ exit_price: px }),
+      });
+      if (res.ok) {
+        btn.textContent = "Closed \u2713";
+        btn.disabled = true;
+        btn.classList.remove("bg-rose-600", "hover:bg-rose-700");
+        btn.classList.add("bg-slate-400");
+      }
+    });
+  });
+}
+
+// --- Reports tab ---
+$("#refreshSchedBtn").addEventListener("click", () => { loadSchedulerStatus(); loadReports(); loadLiveExits(); });
+$("#runNowBtn").addEventListener("click", async () => {
+  $("#runNowStatus").textContent = "Running scan in background... ~30s.";
+  $("#runNowBtn").disabled = true;
+  try {
+    const res = await fetch("/api/scan/run-now", { method: "POST" });
+    if (!res.ok) {
+      $("#runNowStatus").textContent = "Error: " + (await res.text());
+    } else {
+      const report = await res.json();
+      $("#runNowStatus").textContent =
+        `Scan complete. ${report.total_signals} BUY signal(s), ` +
+        `${report.total_exit_alerts || 0} SELL alert(s). Saved as ${report.scan_id}.`;
+      const totalAlerts = (report.total_signals || 0) + (report.total_exit_alerts || 0);
+      if (totalAlerts > 0) {
+        notify("Scan complete",
+          `${report.total_signals || 0} BUY + ${report.total_exit_alerts || 0} SELL alert(s).`);
+      }
+      loadReports();
+      loadSchedulerStatus();
+      loadLiveExits();
+      showReportDetail(report);
+    }
+  } catch (e) {
+    $("#runNowStatus").textContent = "Error: " + e.message;
+  } finally {
+    $("#runNowBtn").disabled = false;
+  }
+});
+
+async function loadLiveExits() {
+  try {
+    const res = await fetch("/api/exits");
+    const data = await res.json();
+    const box = $("#reportsExitsBox");
+    const el = $("#reportsExitAlerts");
+    if (data.alerts && data.alerts.length) {
+      box.classList.remove("hidden");
+      el.innerHTML = data.alerts.map(exitAlertCard).join("");
+      attachExitCloseHandlers("#reportsExitsBox");
+    } else {
+      box.classList.add("hidden");
+      el.innerHTML = "";
+    }
+  } catch (e) {
+    // Silently ignore - the rest of the tab still works.
+  }
+}
+
+async function loadSchedulerStatus() {
+  try {
+    const res = await fetch("/api/scheduler/status");
+    const s = await res.json();
+    const next = s.next_run ? new Date(s.next_run).toLocaleString() : "(not scheduled)";
+    const last = s.last_run
+      ? `${s.last_run.scan_id} (${s.last_run.total_signals} signals, ${s.last_run.duration_seconds}s)`
+      : "never (since server start)";
+    const running = s.is_scanning ? " <span class='text-blue-700 font-semibold'>(scan in progress)</span>" : "";
+    $("#schedulerStatus").innerHTML =
+      `Next run: <strong>${next}</strong> &middot; Last run: ${last}${running}`;
+  } catch (e) {
+    $("#schedulerStatus").textContent = "Failed to load: " + e.message;
+  }
+}
+
+async function loadReports() {
+  try {
+    const res = await fetch("/api/reports?limit=30");
+    const data = await res.json();
+    if (!data.reports.length) {
+      $("#reportsList").innerHTML =
+        `<div class="text-slate-500 italic">No reports yet. Click <strong>Run scan now</strong> to generate one, or wait for the daily scheduled scan.</div>`;
+      return;
+    }
+    $("#reportsList").innerHTML = data.reports.map(r => `
+      <div class="bg-white border border-slate-200 rounded p-3 flex items-center justify-between gap-3 cursor-pointer hover:bg-slate-50"
+           data-report-id="${r.scan_id}">
+        <div>
+          <div class="font-semibold">${r.scan_id}</div>
+          <div class="text-xs text-slate-500">${new Date(r.scan_finished).toLocaleString()} &middot; ${r.duration_seconds}s</div>
+        </div>
+        <div class="text-right">
+          <div class="font-semibold ${r.total_signals > 0 ? 'text-emerald-700' : 'text-slate-500'}">
+            ${r.total_signals} signal${r.total_signals === 1 ? '' : 's'}
+          </div>
+          <div class="text-xs text-slate-500">${strategyHitsSummary(r.strategy_hit_counts)}</div>
+        </div>
+      </div>
+    `).join("");
+    $$("[data-report-id]").forEach(el => el.addEventListener("click", () => loadReportDetail(el.dataset.reportId)));
+  } catch (e) {
+    $("#reportsList").innerHTML = "Failed to load: " + e.message;
+  }
+}
+
+function strategyHitsSummary(counts) {
+  const parts = [];
+  for (const k of Object.keys(STRATEGY_MAP)) {
+    const n = counts && counts[k] ? counts[k] : 0;
+    if (n > 0) parts.push(`${STRATEGY_MAP[k].label}: ${n}`);
+  }
+  return parts.length ? parts.join(" &middot; ") : "no hits";
+}
+
+async function loadReportDetail(scanId) {
+  const res = await fetch(`/api/reports/${scanId}`);
+  if (!res.ok) {
+    $("#reportDetail").classList.remove("hidden");
+    $("#reportDetail").innerHTML = "Failed to load report.";
+    return;
+  }
+  showReportDetail(await res.json());
+}
+
+function showReportDetail(report) {
+  const el = $("#reportDetail");
+  el.classList.remove("hidden");
+  const sections = Object.keys(STRATEGY_MAP).map(k => {
+    const hits = (report.by_strategy && report.by_strategy[k]) || [];
+    const label = STRATEGY_MAP[k].label;
+    if (!hits.length) {
+      return `<details class="border border-slate-200 rounded p-3">
+        <summary class="cursor-pointer">${strategyBadge(k)} <span class="text-slate-500 text-sm ml-2">0 hits</span></summary>
+        <div class="text-sm text-slate-500 italic mt-2">No candidates.</div>
+      </details>`;
+    }
+    return `<details open class="border border-slate-200 rounded p-3">
+      <summary class="cursor-pointer">${strategyBadge(k)} <span class="text-slate-700 text-sm ml-2">${hits.length} hit(s)</span></summary>
+      <div class="space-y-2 mt-3">
+        ${hits.map(s => signalCard(s, true)).join("")}
+      </div>
+    </details>`;
+  }).join("");
+
+  const top = (report.top_picks || []).map(s => signalCard(s, false)).join("");
+  const exits = (report.exit_alerts || []).map(exitAlertCard).join("");
+
+  el.innerHTML = `
+    <div class="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h3 class="text-xl font-bold">Report ${report.scan_id}</h3>
+        <button id="closeReport" class="text-sm text-blue-700 underline">Close</button>
+      </div>
+      <p class="text-sm text-slate-600 mb-4">
+        Finished ${new Date(report.scan_finished).toLocaleString()}.
+        Scanned ${report.universe_size} stocks in ${report.duration_seconds}s.
+        <strong>${report.total_signals}</strong> new BUY signal(s),
+        <strong class="${(report.total_exit_alerts || 0) > 0 ? 'text-rose-700' : ''}">${report.total_exit_alerts || 0}</strong> SELL alert(s) on open trades.
+      </p>
+      ${exits ? `
+        <h4 class="font-semibold mb-2 text-rose-700">SELL alerts on your open trades</h4>
+        <div class="space-y-2 mb-6">${exits}</div>` : ""}
+      ${report.top_picks && report.top_picks.length ? `
+        <h4 class="font-semibold mb-2">Top BUY picks (by score)</h4>
+        <div class="space-y-2 mb-6">${top}</div>` : ""}
+      <h4 class="font-semibold mb-2">By strategy</h4>
+      <div class="space-y-2">${sections}</div>
+    </div>`;
+
+  $("#closeReport").addEventListener("click", () => el.classList.add("hidden"));
+  $$("[data-buy]").forEach(btn => btn.addEventListener("click", paperBuyHandler));
+  attachExitCloseHandlers("#reportDetail");
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// --- Paper trades tab ---
 $("#refreshTrades").addEventListener("click", loadTrades);
 
 async function loadTrades() {
-  const res = await fetch("/api/trades");
-  const data = await res.json();
+  // Load both the trade log AND fresh exit alerts in parallel
+  $("#tradesStatus").textContent = "Refreshing...";
+  const [tradesRes, exitsRes] = await Promise.all([
+    fetch("/api/trades"),
+    fetch("/api/exits"),
+  ]);
+  const data = await tradesRes.json();
+  const exits = await exitsRes.json();
+  $("#tradesStatus").textContent = "";
+
+  // Render exit alerts panel
+  const exitsBox = $("#exitAlertsBox");
+  const exitsEl = $("#exitAlerts");
+  if (exits.alerts && exits.alerts.length) {
+    exitsBox.classList.remove("hidden");
+    exitsEl.innerHTML = exits.alerts.map(exitAlertCard).join("");
+    attachExitCloseHandlers("#exitAlertsBox");
+  } else {
+    exitsBox.classList.add("hidden");
+    exitsEl.innerHTML = "";
+  }
+
   if (!data.trades.length) {
     $("#trades").innerHTML = `<div class="text-slate-500 italic">No paper trades yet. Run a scan and paper-buy a candidate.</div>`;
     return;
@@ -169,19 +470,19 @@ async function loadTrades() {
         <div><strong>${t.ticker.replace('.NS','')}</strong>
           <span class="ml-1 text-xs px-2 py-0.5 rounded ${t.status === 'OPEN' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}">${t.status}</span>
         </div>
-        <div class="text-xs text-slate-500">${t.ts} • ${t.action} ${t.qty} @ ₹${t.price}</div>
+        <div class="text-xs text-slate-500">${t.ts} &middot; ${t.action} ${t.qty} @ &#8377;${t.price}</div>
       </div>
       <div class="text-right">
         ${t.status === 'OPEN'
           ? `<button data-close="${t.id}" class="text-sm text-blue-700 underline">Close at current price</button>`
-          : `<div class="font-semibold ${t.pnl >= 0 ? 'text-emerald-700' : 'text-red-700'}">P&L: ₹${t.pnl} (${t.pnl_pct}%)</div>`}
+          : `<div class="font-semibold ${t.pnl >= 0 ? 'text-emerald-700' : 'text-red-700'}">P&amp;L: &#8377;${t.pnl} (${t.pnl_pct}%)</div>`}
       </div>
     </div>
   `).join("");
 
   $$("[data-close]").forEach(btn => btn.addEventListener("click", async () => {
     const id = btn.dataset.close;
-    const px = prompt("Exit price (₹):");
+    const px = prompt("Exit price:");
     if (!px) return;
     const res = await fetch(`/api/trades/${id}/close`, {
       method: "POST",
