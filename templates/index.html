@@ -25,6 +25,7 @@
       <button data-tab="scan"   class="tab px-4 py-2 border-b-2 border-transparent text-slate-600">Scanner</button>
       <button data-tab="trades" class="tab px-4 py-2 border-b-2 border-transparent text-slate-600">Paper Trades</button>
       <button data-tab="history" class="tab px-4 py-2 border-b-2 border-transparent text-slate-600">Scan History</button>
+      <button data-tab="backtest" class="tab px-4 py-2 border-b-2 border-transparent text-slate-600">Backtest</button>
     </nav>
 
     <!-- Morning Brief tab -->
@@ -79,6 +80,58 @@
       </div>
       <div id="history" class="space-y-2"></div>
     </section>
+
+    <!-- Backtest tab -->
+    <section id="tab-backtest" class="hidden">
+      <div class="bg-white border border-slate-200 rounded-lg p-4 mb-4">
+        <h3 class="font-semibold mb-3">Run a Backtest</h3>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+          <label class="block">
+            Universe
+            <select id="btUniverse" class="w-full border border-slate-300 rounded px-2 py-1 mt-1">
+              {% for u in universes %}
+                <option value="{{ u.name }}">{{ u.name }} ({{ u.size }})</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="block">
+            Years of history
+            <input type="number" id="btYears" value="5" min="1" max="10" class="w-full border border-slate-300 rounded px-2 py-1 mt-1" />
+          </label>
+          <label class="block">
+            Starting capital (₹)
+            <input type="number" id="btCapital" value="100000" min="10000" step="10000" class="w-full border border-slate-300 rounded px-2 py-1 mt-1" />
+          </label>
+          <label class="block">
+            Risk per trade (%)
+            <input type="number" id="btRisk" value="2" min="0.5" max="5" step="0.5" class="w-full border border-slate-300 rounded px-2 py-1 mt-1" />
+          </label>
+          <label class="block">
+            Slippage (bps each side)
+            <input type="number" id="btSlippage" value="10" min="0" max="100" class="w-full border border-slate-300 rounded px-2 py-1 mt-1" />
+          </label>
+          <label class="block">
+            Brokerage (bps each side)
+            <input type="number" id="btBrokerage" value="5" min="0" max="100" class="w-full border border-slate-300 rounded px-2 py-1 mt-1" />
+          </label>
+          <label class="block">
+            Cooldown (days)
+            <input type="number" id="btCooldown" value="10" min="0" max="60" class="w-full border border-slate-300 rounded px-2 py-1 mt-1" />
+          </label>
+          <div class="flex items-end">
+            <button id="btRunBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded w-full">
+              Run Backtest
+            </button>
+          </div>
+        </div>
+        <p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mt-3">
+          ⚠️ Synchronous request. NIFTY_50 × 5y typically takes 30–60s; FNO_LIQUID × 5y can take 2–3 min.
+          Page will block until complete.
+        </p>
+        <div id="btStatus" class="text-slate-500 text-sm mt-2"></div>
+      </div>
+      <div id="btResults"></div>
+    </section>
   </div>
 
 <script>
@@ -94,11 +147,12 @@ $$(".tab").forEach(btn => btn.addEventListener("click", () => {
   btn.classList.add("border-blue-600", "font-semibold");
   btn.classList.remove("border-transparent", "text-slate-600");
 
-  ["brief", "scan", "trades", "history"].forEach(name => {
+  ["brief", "scan", "trades", "history", "backtest"].forEach(name => {
     $(`#tab-${name}`).classList.toggle("hidden", btn.dataset.tab !== name);
   });
   if (btn.dataset.tab === "trades") loadTrades();
   if (btn.dataset.tab === "history") loadHistory();
+  if (btn.dataset.tab === "backtest") loadLastBacktest();
 }));
 
 // --- notifications ---
@@ -328,6 +382,191 @@ async function loadHistory() {
         </div>` : ""}
     </div>
   `).join("");
+}
+
+// --- backtest ---
+$("#btRunBtn").addEventListener("click", runBacktest);
+
+async function runBacktest() {
+  const btn = $("#btRunBtn");
+  btn.disabled = true;
+  btn.textContent = "Running... do not navigate away";
+  $("#btStatus").textContent = "Fetching history and simulating... this may take 1-3 minutes.";
+  $("#btResults").innerHTML = "";
+  const body = {
+    universe: $("#btUniverse").value,
+    years: parseInt($("#btYears").value, 10),
+    starting_capital: parseFloat($("#btCapital").value),
+    risk_per_trade_pct: parseFloat($("#btRisk").value) / 100,
+    slippage_pct: parseFloat($("#btSlippage").value) / 10000,
+    brokerage_pct: parseFloat($("#btBrokerage").value) / 10000,
+    cooldown_days: parseInt($("#btCooldown").value, 10),
+  };
+  try {
+    const res = await fetch("/api/backtest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(err || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    renderBacktest(data);
+    $("#btStatus").textContent = `Done in ${data.duration_seconds}s.`;
+  } catch (e) {
+    $("#btStatus").textContent = "Backtest failed: " + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Run Backtest";
+  }
+}
+
+async function loadLastBacktest() {
+  // Don't overwrite anything if user just ran one
+  if ($("#btResults").children.length > 0) return;
+  try {
+    const res = await fetch("/api/backtest/last");
+    if (!res.ok) return;  // no prior backtest
+    const data = await res.json();
+    renderBacktest(data);
+    $("#btStatus").textContent = `Showing last result from ${data.finished_at}.`;
+  } catch { /* ignore */ }
+}
+
+function fmtNum(n, dp = 2) {
+  if (n === null || n === undefined || isNaN(n)) return "—";
+  return Number(n).toLocaleString("en-IN", {
+    minimumFractionDigits: dp, maximumFractionDigits: dp,
+  });
+}
+
+function renderBacktest(data) {
+  const cfg = data.config || {};
+  const summary = `
+    <div class="bg-white border border-slate-200 rounded-lg p-4">
+      <h3 class="font-semibold mb-2">Backtest Summary</h3>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+        <div><div class="text-slate-500">Universe</div><div class="font-semibold">${cfg.universe} (${data.tickers_with_data}/${data.universe_size} tickers had data)</div></div>
+        <div><div class="text-slate-500">Years</div><div class="font-semibold">${cfg.years}</div></div>
+        <div><div class="text-slate-500">Trades</div><div class="font-semibold">${(data.trades || []).length}${data.trades_truncated ? " (showing last 200)" : ""}</div></div>
+        <div><div class="text-slate-500">Overall expectancy</div><div class="font-semibold ${data.overall_expectancy_pct >= 0 ? "text-emerald-700" : "text-red-700"}">${fmtNum(data.overall_expectancy_pct)}% per trade</div></div>
+        <div><div class="text-slate-500">Final equity</div><div class="font-semibold">₹${fmtNum(data.final_equity, 0)}</div></div>
+        <div><div class="text-slate-500">Total return</div><div class="font-semibold ${data.total_return_pct >= 0 ? "text-emerald-700" : "text-red-700"}">${fmtNum(data.total_return_pct)}%</div></div>
+        <div><div class="text-slate-500">Max drawdown</div><div class="font-semibold text-red-700">-${fmtNum(data.max_drawdown_pct)}%</div></div>
+        <div><div class="text-slate-500">Duration</div><div class="font-semibold">${data.duration_seconds}s</div></div>
+      </div>
+    </div>
+  `;
+
+  const byStrat = `
+    <div class="bg-white border border-slate-200 rounded-lg p-4 mt-4">
+      <h3 class="font-semibold mb-2">Per-Strategy Performance</h3>
+      <table class="w-full text-sm">
+        <thead class="border-b border-slate-200 text-left text-slate-600">
+          <tr>
+            <th class="py-2">Strategy</th>
+            <th class="py-2 text-right">Trades</th>
+            <th class="py-2 text-right">Win %</th>
+            <th class="py-2 text-right">Avg Win</th>
+            <th class="py-2 text-right">Avg Loss</th>
+            <th class="py-2 text-right">Expectancy</th>
+            <th class="py-2 text-right">PF</th>
+            <th class="py-2 text-right">Avg Hold</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${(data.by_strategy || []).map(s => `
+            <tr class="border-b border-slate-100">
+              <td class="py-2 font-medium">${s.name}</td>
+              <td class="py-2 text-right">${s.trades}</td>
+              <td class="py-2 text-right">${fmtNum(s.win_rate_pct, 1)}%</td>
+              <td class="py-2 text-right text-emerald-700">+${fmtNum(s.avg_win_pct)}%</td>
+              <td class="py-2 text-right text-red-700">${fmtNum(s.avg_loss_pct)}%</td>
+              <td class="py-2 text-right ${s.expectancy_pct >= 0 ? "text-emerald-700" : "text-red-700"}">${fmtNum(s.expectancy_pct)}%</td>
+              <td class="py-2 text-right">${fmtNum(s.profit_factor)}</td>
+              <td class="py-2 text-right">${fmtNum(s.avg_days_held, 1)}d</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  // Inline equity-curve sparkline (SVG)
+  const curve = data.equity_curve || [];
+  let curveHtml = "";
+  if (curve.length > 1) {
+    const W = 600, H = 120, P = 6;
+    const eqs = curve.map(p => p.equity);
+    const minE = Math.min(...eqs), maxE = Math.max(...eqs);
+    const range = (maxE - minE) || 1;
+    const points = curve.map((p, i) => {
+      const x = P + (i / (curve.length - 1)) * (W - 2 * P);
+      const y = H - P - ((p.equity - minE) / range) * (H - 2 * P);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ");
+    curveHtml = `
+      <div class="bg-white border border-slate-200 rounded-lg p-4 mt-4">
+        <h3 class="font-semibold mb-2">Equity Curve</h3>
+        <svg viewBox="0 0 ${W} ${H}" class="w-full" preserveAspectRatio="none">
+          <polyline fill="none" stroke="#2563eb" stroke-width="2" points="${points}" />
+        </svg>
+        <div class="flex justify-between text-xs text-slate-500 mt-1">
+          <span>Start: ₹${fmtNum(curve[0].equity, 0)}</span>
+          <span>End: ₹${fmtNum(curve[curve.length - 1].equity, 0)}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  // Trade list (last ~50)
+  const trades = data.trades || [];
+  const tradesHtml = `
+    <div class="bg-white border border-slate-200 rounded-lg p-4 mt-4">
+      <h3 class="font-semibold mb-2">Trades${data.trades_truncated ? " (last 200)" : ""}</h3>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead class="border-b border-slate-200 text-left text-slate-600">
+            <tr>
+              <th class="py-1">Ticker</th>
+              <th class="py-1">Strategy</th>
+              <th class="py-1">Entry</th>
+              <th class="py-1">Exit</th>
+              <th class="py-1 text-right">P&amp;L %</th>
+              <th class="py-1 text-right">Days</th>
+              <th class="py-1">Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${trades.slice(-50).map(t => `
+              <tr class="border-b border-slate-100">
+                <td class="py-1 font-medium">${t.ticker.replace(".NS", "")}</td>
+                <td class="py-1">${t.strategy}</td>
+                <td class="py-1">${t.entry_date}</td>
+                <td class="py-1">${t.exit_date}</td>
+                <td class="py-1 text-right ${t.pnl_pct >= 0 ? "text-emerald-700" : "text-red-700"}">${fmtNum(t.pnl_pct)}%</td>
+                <td class="py-1 text-right">${t.days_held}</td>
+                <td class="py-1 text-slate-500">${t.exit_reason}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  const notesHtml = `
+    <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 mt-4 text-sm">
+      <h3 class="font-semibold mb-2">Notes &amp; Caveats</h3>
+      <ul class="list-disc pl-5 space-y-1">
+        ${(data.notes || []).map(n => `<li>${n}</li>`).join("")}
+      </ul>
+    </div>
+  `;
+
+  $("#btResults").innerHTML = summary + byStrat + curveHtml + tradesHtml + notesHtml;
 }
 
 // auto-load brief on first paint

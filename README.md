@@ -120,9 +120,10 @@ Never lose more than 2% of your total capital on a single trade.
 │   ├── strategies.py        Minervini-lite + Kotegawa + Darvas
 │   ├── morning_brief.py     Premarket macro snapshot
 │   ├── scan_history.py      Persistent scan log
+│   ├── backtest.py          Point-in-time backtest engine
 │   └── paper_trades.py      JSON-backed paper trade log
 └── templates/
-    └── index.html           Dashboard UI (4 tabs)
+    └── index.html           Dashboard UI (5 tabs)
 ```
 
 ---
@@ -136,9 +137,63 @@ Never lose more than 2% of your total capital on a single trade.
 | `GET`  | `/api/scan?universe=NIFTY_100` | Run a scan |
 | `GET`  | `/api/morning-brief` | Premarket macro snapshot |
 | `GET`  | `/api/scan-history?limit=25` | Recent scan records |
+| `POST` | `/api/backtest` | Run a backtest (synchronous, 30s–3min) |
+| `GET`  | `/api/backtest/last` | Get last backtest result |
 | `GET`  | `/api/trades` | List paper trades |
 | `POST` | `/api/trades` | Log a paper trade |
 | `POST` | `/api/trades/{id}/close` | Close an open paper trade |
+
+---
+
+## Backtest
+
+The `Backtest` tab in the dashboard replays the 3 strategies day-by-day
+against `years` years of historical yfinance data, applies the same exit
+rules used by Exit Watch, and reports per-strategy statistics with realistic
+trading friction.
+
+### How to run
+
+1. Start the dashboard: `uvicorn app.main:app --reload`
+2. Open the **Backtest** tab.
+3. Pick a universe (start with `NIFTY_50` for fastest iteration).
+4. Click **Run Backtest**. NIFTY_50 × 5y typically takes 30–60s; FNO_LIQUID
+   × 5y can take 2–3 min (yfinance is the slow part).
+5. Review the summary, per-strategy table, equity curve, and trade list.
+
+### What "good" looks like
+
+| Metric | Bad | Decent | Great |
+|---|---|---|---|
+| Overall expectancy | < 0% | 0.5–1.5% | > 1.5% |
+| Win rate per strategy | < 35% | 45–55% | > 55% |
+| Profit factor | < 1.0 | 1.3–1.8 | > 1.8 |
+| Max drawdown | > 30% | 15–25% | < 15% |
+| Number of trades | < 50 | 100–300 | > 300 |
+
+### Caveats (be honest with yourself)
+
+- **Survivorship bias** — yfinance shows only currently-listed tickers.
+  Stocks that delisted are missing, biasing results upward by ~2–4% per year.
+- **Look-ahead bias** — yfinance's auto-adjusted close incorporates future
+  splits/dividends. Acceptable for swing-trade backtests; not for
+  tick-precision research.
+- **Friction is approximate** — defaults model 10 bps slippage + 5 bps
+  brokerage each side (so 30 bps round-trip total). Real Zerodha costs
+  for delivery (CNC) on a small ₹5K trade can be 0.5–1% in absolute terms.
+- **No regime conditioning** — a strategy that worked 2019–24 might fail
+  2025–28. Backtest across multiple regimes if you can.
+- **Overfitting risk** — never tune the strategy parameters until the
+  backtest looks great. Set them once, walk-forward validate.
+
+### Recommended workflow
+
+1. Run NIFTY_50 × 5y → quickly sanity-check the engine works on real data.
+2. Run FNO_LIQUID × 5y → wider universe = more trades, more reliable stats.
+3. Compare per-strategy expectancy. **If one strategy has < 0% expectancy,
+   stop trading it on real money.** Drop it from your daily routine.
+4. After 30+ paper trades, compare your *paper* expectancy to the *backtest*
+   expectancy. The gap is your execution leak.
 
 ---
 
@@ -147,11 +202,12 @@ Never lose more than 2% of your total capital on a single trade.
 - [x] **Phase 1** — Web dashboard + paper trading
 - [x] **Phase 2** — Telegram bot with inline approval buttons
 - [x] **Scanner v2** — volume thrust, relative strength, Darvas breakout, expanded universe, morning brief, scan history
+- [x] **Backtest engine** — point-in-time replay against yfinance with realistic friction
 - [ ] **Phase 3** — Real order placement via Zerodha Kite Connect (see below)
 - [ ] Daily auto-scan via cron / GitHub Actions
-- [ ] Backtest engine that replays scan history against subsequent price action
 - [ ] Sector / industry rollups (which sectors are leading?)
 - [ ] FII / DII flow data (requires NSE bhavcopy integration)
+- [ ] Exit Watch — live exit-rule monitor for open paper trades
 
 ---
 

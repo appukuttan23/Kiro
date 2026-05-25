@@ -19,6 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from app import paper_trades, scan_history
+from app.backtest import BacktestConfig, BacktestResult, run_backtest
 from app.data import fetch_benchmark, fetch_history, next_earnings_days_away
 from app.morning_brief import fetch_morning_brief
 from app.strategies import ALL_STRATEGIES, Signal
@@ -114,6 +115,61 @@ async def api_morning_brief() -> JSONResponse:
 @app.get("/api/scan-history")
 async def api_scan_history(limit: int = 25) -> JSONResponse:
     return JSONResponse({"history": scan_history.list_history(limit=limit)})
+
+
+# ---------- backtest ----------
+
+# In-process cache so the frontend can re-fetch a recent backtest cheaply.
+_BACKTEST_CACHE: dict[str, BacktestResult] = {}
+
+
+@app.post("/api/backtest")
+async def api_backtest(body: dict[str, Any]) -> JSONResponse:
+    """Run a backtest. Synchronous — may block 30s-3min depending on universe.
+
+    Request body (all optional, sane defaults from BacktestConfig):
+      { universe, years, starting_capital, risk_per_trade_pct,
+        slippage_pct, brokerage_pct, cooldown_days }
+    """
+    try:
+        cfg = BacktestConfig(
+            universe=str(body.get("universe", "NIFTY_50")),
+            years=int(body.get("years", 5)),
+            starting_capital=float(body.get("starting_capital", 100_000)),
+            risk_per_trade_pct=float(body.get("risk_per_trade_pct", 0.02)),
+            slippage_pct=float(body.get("slippage_pct", 0.001)),
+            brokerage_pct=float(body.get("brokerage_pct", 0.0005)),
+            cooldown_days=int(body.get("cooldown_days", 10)),
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, f"Invalid backtest config: {exc}")
+
+    log.info("Backtest requested: %s", cfg)
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, run_backtest, cfg)
+    _BACKTEST_CACHE["last"] = result
+    return JSONResponse(_result_to_dict(result))
+
+
+@app.get("/api/backtest/last")
+async def api_backtest_last() -> JSONResponse:
+    """Return the most-recent backtest result if available."""
+    last = _BACKTEST_CACHE.get("last")
+    if last is None:
+        return JSONResponse({"error": "no backtest run yet"}, status_code=404)
+    return JSONResponse(_result_to_dict(last))
+
+
+def _result_to_dict(r: BacktestResult) -> dict[str, Any]:
+    """Convert dataclass to dict, capping the trade list for the API response."""
+    from dataclasses import asdict
+    d = asdict(r)
+    # Trade list can be huge (thousands). Return only the last 200 to keep
+    # the response readable; full list is logged server-side.
+    if len(d.get("trades", [])) > 200:
+        d["trades_truncated"] = True
+        d["trades"] = d["trades"][-200:]
+    return d
 
 
 @app.get("/api/trades")
