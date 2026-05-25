@@ -12,8 +12,8 @@
     <header class="mb-6">
       <h1 class="text-3xl font-bold">Indian Trading Alerts</h1>
       <p class="text-slate-600">
-        Scans <strong>Nifty 50</strong> ({{ universe_size }} stocks) using two beginner-friendly strategies:
-        <em>Minervini-Lite Trend</em> and <em>Kotegawa 25-day Mean Reversion</em>.
+        Daily scanner for Indian equities using <em>Minervini-Lite Trend</em>,
+        <em>Kotegawa Mean Reversion</em>, and <em>Darvas Breakout</em>.
       </p>
       <p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mt-2">
         Educational tool only. Not financial advice. Always use a stop-loss. Never risk more than 2% of your capital per trade.
@@ -21,15 +21,38 @@
     </header>
 
     <nav class="flex gap-2 border-b border-slate-200 mb-4">
-      <button data-tab="scan"   class="tab px-4 py-2 border-b-2 border-blue-600 font-semibold">Scanner</button>
+      <button data-tab="brief"  class="tab px-4 py-2 border-b-2 border-blue-600 font-semibold">Morning Brief</button>
+      <button data-tab="scan"   class="tab px-4 py-2 border-b-2 border-transparent text-slate-600">Scanner</button>
       <button data-tab="trades" class="tab px-4 py-2 border-b-2 border-transparent text-slate-600">Paper Trades</button>
+      <button data-tab="history" class="tab px-4 py-2 border-b-2 border-transparent text-slate-600">Scan History</button>
     </nav>
 
-    <!-- Scanner tab -->
-    <section id="tab-scan">
+    <!-- Morning Brief tab -->
+    <section id="tab-brief">
       <div class="flex items-center gap-3 mb-4">
+        <button id="briefBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded">
+          Refresh Premarket Snapshot
+        </button>
+        <span id="briefStatus" class="text-slate-500 text-sm"></span>
+      </div>
+      <div id="briefBody" class="space-y-4">
+        <p class="text-slate-500 italic">Click <em>Refresh</em> to load Nifty / India VIX / USD-INR / Brent / global indices.</p>
+      </div>
+    </section>
+
+    <!-- Scanner tab -->
+    <section id="tab-scan" class="hidden">
+      <div class="flex flex-wrap items-center gap-3 mb-4">
+        <label class="text-sm">
+          Universe:
+          <select id="universeSel" class="border border-slate-300 rounded px-2 py-1 ml-1 text-sm">
+            {% for u in universes %}
+              <option value="{{ u.name }}">{{ u.name }} ({{ u.size }})</option>
+            {% endfor %}
+          </select>
+        </label>
         <button id="scanBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded">
-          Scan Nifty 50
+          Scan
         </button>
         <span id="status" class="text-slate-500 text-sm"></span>
       </div>
@@ -44,6 +67,17 @@
         </button>
       </div>
       <div id="trades" class="space-y-2"></div>
+    </section>
+
+    <!-- Scan History tab -->
+    <section id="tab-history" class="hidden">
+      <div class="flex items-center gap-3 mb-4">
+        <button id="refreshHistory" class="bg-slate-600 hover:bg-slate-700 text-white font-semibold px-4 py-2 rounded">
+          Refresh
+        </button>
+        <span class="text-xs text-slate-500">Most recent 25 scans (used for tracking signal quality over time).</span>
+      </div>
+      <div id="history" class="space-y-2"></div>
     </section>
   </div>
 
@@ -60,9 +94,11 @@ $$(".tab").forEach(btn => btn.addEventListener("click", () => {
   btn.classList.add("border-blue-600", "font-semibold");
   btn.classList.remove("border-transparent", "text-slate-600");
 
-  $("#tab-scan").classList.toggle("hidden", btn.dataset.tab !== "scan");
-  $("#tab-trades").classList.toggle("hidden", btn.dataset.tab !== "trades");
+  ["brief", "scan", "trades", "history"].forEach(name => {
+    $(`#tab-${name}`).classList.toggle("hidden", btn.dataset.tab !== name);
+  });
   if (btn.dataset.tab === "trades") loadTrades();
+  if (btn.dataset.tab === "history") loadHistory();
 }));
 
 // --- notifications ---
@@ -80,17 +116,84 @@ function notify(title, body) {
   }
 }
 
+// --- Morning Brief ---
+$("#briefBtn").addEventListener("click", loadBrief);
+
+function fmtPct(p) {
+  if (p === null || p === undefined) return "<span class=\"text-slate-400\">—</span>";
+  const cls = p >= 0 ? "text-emerald-700" : "text-red-700";
+  const sign = p >= 0 ? "+" : "";
+  return `<span class="${cls} font-semibold">${sign}${p.toFixed(2)}%</span>`;
+}
+
+function fmtPrice(p) {
+  if (p === null || p === undefined) return "<span class=\"text-slate-400\">—</span>";
+  return p.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+}
+
+function renderSection(title, items) {
+  return `
+    <div class="bg-white border border-slate-200 rounded-lg p-4">
+      <h3 class="font-semibold mb-2">${title}</h3>
+      <table class="w-full text-sm">
+        <tbody>
+          ${items.map(it => `
+            <tr class="border-t border-slate-100">
+              <td class="py-1.5">${it.label} <span class="text-xs text-slate-400">(${it.symbol})</span></td>
+              <td class="py-1.5 text-right">${fmtPrice(it.price)}</td>
+              <td class="py-1.5 text-right pl-3">${fmtPct(it.change_pct)}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function loadBrief() {
+  $("#briefStatus").textContent = "Loading...";
+  $("#briefBody").innerHTML = "";
+  try {
+    const res = await fetch("/api/morning-brief");
+    const data = await res.json();
+    const interp = data.interpretation || {};
+    $("#briefBody").innerHTML = `
+      ${renderSection("India", data.india)}
+      ${renderSection("Commodities", data.commodities)}
+      ${renderSection("Global Indices", data.global)}
+      <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm">
+        <h3 class="font-semibold mb-2">Reading the tape</h3>
+        <ul class="list-disc pl-5 space-y-1">
+          <li><strong>India VIX:</strong> ${interp.vix}</li>
+          <li><strong>USD/INR:</strong> ${interp.inr}</li>
+          <li><strong>Brent:</strong> ${interp.brent}</li>
+        </ul>
+      </div>
+      <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm">
+        <h3 class="font-semibold mb-2">Manual checks</h3>
+        <ul class="list-disc pl-5 space-y-1">
+          ${(data.notes || []).map(n => `<li>${n}</li>`).join("")}
+        </ul>
+      </div>
+    `;
+    $("#briefStatus").textContent = "Updated.";
+  } catch (e) {
+    $("#briefStatus").textContent = "Failed to load brief: " + e.message;
+  }
+}
+
 // --- scan ---
 $("#scanBtn").addEventListener("click", async () => {
   await ensureNotifyPermission();
-  $("#status").textContent = "Scanning... this can take ~30 seconds.";
+  const universe = $("#universeSel").value;
+  $("#status").textContent = `Scanning ${universe}... this can take 30-90 seconds for larger universes.`;
   $("#signals").innerHTML = "";
   try {
-    const res = await fetch("/api/scan");
+    const res = await fetch(`/api/scan?universe=${encodeURIComponent(universe)}`);
     const data = await res.json();
     renderSignals(data.signals);
-    $("#status").textContent = `Found ${data.count} candidate(s).`;
-    if (data.count > 0) notify("Trading Alerts", `${data.count} candidate(s) found in Nifty 50.`);
+    $("#status").textContent = `Scanned ${data.universe} (${data.universe_size} stocks). Found ${data.count} candidate(s).`;
+    if (data.count > 0) notify("Trading Alerts", `${data.count} candidate(s) found in ${data.universe}.`);
   } catch (e) {
     $("#status").textContent = "Scan failed: " + e.message;
   }
@@ -100,6 +203,7 @@ function strategyBadge(s) {
   const map = {
     minervini_lite:    { label: "Trend (Minervini)",    cls: "bg-emerald-100 text-emerald-800" },
     kotegawa_meanrev:  { label: "Mean Reversion (BNF)", cls: "bg-indigo-100 text-indigo-800" },
+    darvas_breakout:   { label: "Breakout (Darvas)",    cls: "bg-orange-100 text-orange-800" },
   };
   const m = map[s] || { label: s, cls: "bg-slate-100 text-slate-800" };
   return `<span class="text-xs font-semibold px-2 py-1 rounded ${m.cls}">${m.label}</span>`;
@@ -122,7 +226,11 @@ function renderSignals(signals) {
           <div class="text-lg font-semibold">₹${s.price.toFixed(2)}</div>
         </div>
       </div>
-      <p class="text-sm text-slate-700 mb-3">${s.reason}</p>
+      <p class="text-sm text-slate-700 mb-2">${s.reason}</p>
+      ${(s.warnings || []).length ? `
+        <div class="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 mb-2">
+          ${s.warnings.map(w => `⚠️ ${w}`).join("<br/>")}
+        </div>` : ""}
       <div class="flex items-center gap-2">
         <input type="number" min="1" value="10" data-qty="${s.ticker}"
                class="border border-slate-300 rounded px-2 py-1 w-24 text-sm" />
@@ -191,6 +299,39 @@ async function loadTrades() {
     if (res.ok) loadTrades();
   }));
 }
+
+// --- scan history ---
+$("#refreshHistory").addEventListener("click", loadHistory);
+
+async function loadHistory() {
+  const res = await fetch("/api/scan-history?limit=25");
+  const data = await res.json();
+  if (!data.history.length) {
+    $("#history").innerHTML = `<div class="text-slate-500 italic">No scan history yet. Run a scan to record one.</div>`;
+    return;
+  }
+  $("#history").innerHTML = data.history.map(h => `
+    <div class="bg-white border border-slate-200 rounded p-3">
+      <div class="flex justify-between text-sm">
+        <div>
+          <span class="font-semibold">${h.universe}</span>
+          <span class="text-slate-500">${h.ts}</span>
+        </div>
+        <div class="text-slate-700">${h.signal_count} signal(s)</div>
+      </div>
+      ${h.signal_count > 0 ? `
+        <div class="mt-2 text-xs text-slate-600">
+          ${h.signals.slice(0, 6).map(s =>
+            `<span class="inline-block bg-slate-100 px-2 py-0.5 rounded mr-1 mb-1">${(s.display || s.ticker)} (${s.strategy})</span>`
+          ).join("")}
+          ${h.signals.length > 6 ? `<span class="text-slate-400">+${h.signals.length - 6} more</span>` : ""}
+        </div>` : ""}
+    </div>
+  `).join("");
+}
+
+// auto-load brief on first paint
+loadBrief();
 </script>
 </body>
 </html>
