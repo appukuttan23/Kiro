@@ -1,7 +1,7 @@
 # Indian Trading Alerts (Beginner MVP)
 
-A simple, beginner-friendly stock alert app for **Indian markets (Nifty 50)**.
-Helps you find candidate trades using two proven, codeable strategies — without
+A simple, beginner-friendly stock alert app for **Indian markets**.
+Helps you find candidate trades using proven, codeable strategies — without
 having to pick stocks yourself.
 
 > **Disclaimer:** This is an educational tool. It is **not** financial advice.
@@ -13,18 +13,37 @@ having to pick stocks yourself.
 
 ## What it does
 
-1. **Scans all 50 Nifty 50 stocks** automatically — you don't pick.
-2. Applies two well-known strategies:
+1. **Scans configurable universes** automatically — you don't pick the stock.
+   - `NIFTY_50` (50)
+   - `NIFTY_NEXT_50` (50)
+   - `NIFTY_100` (100)
+   - `FNO_LIQUID` (~150 most-liquid F&O names)
+2. Applies **three** well-known strategies:
    - **Minervini-Lite Trend Template** (momentum / trend-following)
-     - Price > 50-day, 150-day, 200-day SMA
+     - Price > 50, 150, 200-day SMAs
      - 50 SMA > 150 SMA > 200 SMA
      - 200 SMA trending up
+     - Within 25% of 52-week high
+     - Recent 5d volume ≥ 1.2× of 20d baseline (institutional accumulation proxy)
+     - **Bonus**: outperforming Nifty over 3 months (relative strength)
    - **Kotegawa 25-day Mean Reversion** (buy-the-dip)
-     - Price > 5% below 25-day SMA
+     - Price ≥ 5% below 25-day SMA
      - RSI(14) < 30
-3. Shows you **only a handful of candidates per day** (no overwhelm).
-4. Gives a **plain-English reason** for every alert.
-5. Lets you **log paper trades** to practice without real money.
+     - Above 200-day SMA (uptrend filter)
+     - **Filter**: not significantly underperforming Nifty over 6M (no falling knives)
+   - **Darvas / 52-Week-High Breakout** (NEW — pattern-based momentum)
+     - Today closes at fresh 252-day high
+     - Prior 20-day range ≤ 15% (tight consolidation)
+     - Today's volume ≥ 1.5× of 20-day average
+     - Price > 50-day SMA
+3. Shows you only a handful of candidates per day with a **plain-English reason**.
+4. **Soft warnings**: if earnings fall within ~3 days, the candidate is flagged
+   (not rejected — yfinance earnings dates are flaky).
+5. **Morning Brief tab**: snapshot of Nifty spot, India VIX, USD/INR, Brent,
+   Gold, S&P 500, Dow, Nasdaq, Nikkei, Hang Seng — with one-line interpretations.
+6. **Scan history**: every scan is persisted so you can review signal quality
+   over time and (later) backtest.
+7. **Paper-trade log** to practise without real money.
 
 ---
 
@@ -50,10 +69,28 @@ Then open http://localhost:8000 in your browser.
 
 ### 4. Use it
 
-1. Click **"Scan Nifty 50"** — wait ~30s while it pulls data.
-2. Review the candidates and the reason for each.
-3. Click **"Paper Buy"** on any candidate to log a practice trade.
-4. Track your paper trades on the **Trades** tab.
+1. The **Morning Brief** loads automatically — check VIX, INR, crude before you trade.
+2. Switch to the **Scanner** tab, pick a universe, click **Scan**.
+3. Review candidates and the reason for each.
+4. Click **Paper Buy** to log a practice trade.
+5. Track your paper trades on the **Paper Trades** tab.
+6. Review your scan history on the **Scan History** tab.
+
+---
+
+## Recommended Daily Routine (for delivery / swing trading)
+
+| Time (IST) | Step |
+|---|---|
+| **8:30 AM** | Open Morning Brief tab. Read VIX, INR, Brent, US close. |
+| **8:45 AM** | Manually check GIFT Nifty pre-market on businesstoday.in or NDTV Profit. |
+| **9:00 AM** | Manually check FII / DII data (released ~6 PM previous evening on NSE). |
+| **9:15 AM** | Avoid the first 15 min — opening volatility kills tight stops. |
+| **9:30 AM–3:30 PM** | If you are placing manual orders for prior day's signals, do it now. |
+| **4:00 PM** | EOD data settles. |
+| **4:30 PM** | Run **Scan NIFTY_100** (or **FNO_LIQUID** for wider net). |
+| **4:35 PM** | Review top candidates, eyeball charts on TradingView. |
+| **4:45 PM** | Log paper-buys for top 1–3 picks. Place real orders next morning at 9:20. |
 
 ---
 
@@ -78,24 +115,99 @@ Never lose more than 2% of your total capital on a single trade.
 │   ├── __init__.py
 │   ├── main.py              FastAPI web app + routes
 │   ├── telegram_bot.py      Telegram bot (Phase 2)
-│   ├── universe.py          Nifty 50 tickers
-│   ├── data.py              yfinance data fetcher
-│   ├── strategies.py        Minervini-lite + Kotegawa
+│   ├── universe.py          NIFTY_50 / NIFTY_NEXT_50 / NIFTY_100 / FNO_LIQUID
+│   ├── data.py              yfinance wrapper + benchmark + earnings lookup
+│   ├── strategies.py        Minervini-lite + Kotegawa + Darvas
+│   ├── morning_brief.py     Premarket macro snapshot
+│   ├── scan_history.py      Persistent scan log
+│   ├── backtest.py          Point-in-time backtest engine
 │   └── paper_trades.py      JSON-backed paper trade log
 └── templates/
-    └── index.html           Dashboard UI
+    └── index.html           Dashboard UI (5 tabs)
 ```
 
 ---
 
-## Roadmap (next steps)
+## API Endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET`  | `/` | Web dashboard |
+| `GET`  | `/api/universes` | List available universes |
+| `GET`  | `/api/scan?universe=NIFTY_100` | Run a scan |
+| `GET`  | `/api/morning-brief` | Premarket macro snapshot |
+| `GET`  | `/api/scan-history?limit=25` | Recent scan records |
+| `POST` | `/api/backtest` | Run a backtest (synchronous, 30s–3min) |
+| `GET`  | `/api/backtest/last` | Get last backtest result |
+| `GET`  | `/api/trades` | List paper trades |
+| `POST` | `/api/trades` | Log a paper trade |
+| `POST` | `/api/trades/{id}/close` | Close an open paper trade |
+
+---
+
+## Backtest
+
+The `Backtest` tab in the dashboard replays the 3 strategies day-by-day
+against `years` years of historical yfinance data, applies the same exit
+rules used by Exit Watch, and reports per-strategy statistics with realistic
+trading friction.
+
+### How to run
+
+1. Start the dashboard: `uvicorn app.main:app --reload`
+2. Open the **Backtest** tab.
+3. Pick a universe (start with `NIFTY_50` for fastest iteration).
+4. Click **Run Backtest**. NIFTY_50 × 5y typically takes 30–60s; FNO_LIQUID
+   × 5y can take 2–3 min (yfinance is the slow part).
+5. Review the summary, per-strategy table, equity curve, and trade list.
+
+### What "good" looks like
+
+| Metric | Bad | Decent | Great |
+|---|---|---|---|
+| Overall expectancy | < 0% | 0.5–1.5% | > 1.5% |
+| Win rate per strategy | < 35% | 45–55% | > 55% |
+| Profit factor | < 1.0 | 1.3–1.8 | > 1.8 |
+| Max drawdown | > 30% | 15–25% | < 15% |
+| Number of trades | < 50 | 100–300 | > 300 |
+
+### Caveats (be honest with yourself)
+
+- **Survivorship bias** — yfinance shows only currently-listed tickers.
+  Stocks that delisted are missing, biasing results upward by ~2–4% per year.
+- **Look-ahead bias** — yfinance's auto-adjusted close incorporates future
+  splits/dividends. Acceptable for swing-trade backtests; not for
+  tick-precision research.
+- **Friction is approximate** — defaults model 10 bps slippage + 5 bps
+  brokerage each side (so 30 bps round-trip total). Real Zerodha costs
+  for delivery (CNC) on a small ₹5K trade can be 0.5–1% in absolute terms.
+- **No regime conditioning** — a strategy that worked 2019–24 might fail
+  2025–28. Backtest across multiple regimes if you can.
+- **Overfitting risk** — never tune the strategy parameters until the
+  backtest looks great. Set them once, walk-forward validate.
+
+### Recommended workflow
+
+1. Run NIFTY_50 × 5y → quickly sanity-check the engine works on real data.
+2. Run FNO_LIQUID × 5y → wider universe = more trades, more reliable stats.
+3. Compare per-strategy expectancy. **If one strategy has < 0% expectancy,
+   stop trading it on real money.** Drop it from your daily routine.
+4. After 30+ paper trades, compare your *paper* expectancy to the *backtest*
+   expectancy. The gap is your execution leak.
+
+---
+
+## Roadmap
 
 - [x] **Phase 1** — Web dashboard + paper trading
 - [x] **Phase 2** — Telegram bot with inline approval buttons
+- [x] **Scanner v2** — volume thrust, relative strength, Darvas breakout, expanded universe, morning brief, scan history
+- [x] **Backtest engine** — point-in-time replay against yfinance with realistic friction
 - [ ] **Phase 3** — Real order placement via Zerodha Kite Connect (see below)
 - [ ] Daily auto-scan via cron / GitHub Actions
-- [ ] More strategies: Darvas Box, VWAP bounce
-- [ ] Backtest engine
+- [ ] Sector / industry rollups (which sectors are leading?)
+- [ ] FII / DII flow data (requires NSE bhavcopy integration)
+- [ ] Exit Watch — live exit-rule monitor for open paper trades
 
 ---
 
@@ -127,15 +239,22 @@ then restart it.
 
 ### 4. Use it
 
-- `/scan` — scan Nifty 50; you'll get one message per candidate with inline buttons:
+- `/scan [universe]` — scan a universe (default: `NIFTY_50`). Examples:
+  - `/scan` — default
+  - `/scan NIFTY_100`
+  - `/scan FNO_LIQUID`
+- `/universes` — list available universes
+- `/brief` — premarket macro snapshot
+- `/trades` — list your recent paper trades
+
+Each candidate comes with inline buttons:
   - ✅ **Paper Buy 10** — logs a paper trade
   - ❌ **Skip** — dismisses
   - 📊 **Chart** — opens the stock on TradingView
-  - 💼 **View on Kite** — opens the stock on Kite Web (you'll need to log in)
-- `/trades` — list your recent paper trades
+  - 💼 **View on Kite** — opens the stock on Kite Web (login required)
 
 You can run the **web dashboard and the Telegram bot at the same time** — both
-share the same `paper_trades.json` file.
+share the same `paper_trades.json` and `scan_history.json` files.
 
 ---
 
