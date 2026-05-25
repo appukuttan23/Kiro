@@ -12,8 +12,9 @@
     <header class="mb-6">
       <h1 class="text-3xl font-bold">Indian Trading Alerts</h1>
       <p class="text-slate-600">
-        Scans <strong>Nifty 50</strong> ({{ universe_size }} stocks) using two beginner-friendly strategies:
-        <em>Minervini-Lite Trend</em> and <em>Kotegawa 25-day Mean Reversion</em>.
+        Scans <strong>Nifty 50</strong> ({{ universe_size }} stocks) using strategies inspired by legendary traders:
+        <em>Minervini</em>, <em>Kotegawa (BNF)</em>, <em>Darvas</em>, <em>Turtle (Dennis)</em>,
+        <em>Livermore</em>, <em>Zanger</em>, and <em>Qullamaggie</em>.
       </p>
       <p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mt-2">
         Educational tool only. Not financial advice. Always use a stop-loss. Never risk more than 2% of your capital per trade.
@@ -100,6 +101,11 @@ function strategyBadge(s) {
   const map = {
     minervini_lite:    { label: "Trend (Minervini)",    cls: "bg-emerald-100 text-emerald-800" },
     kotegawa_meanrev:  { label: "Mean Reversion (BNF)", cls: "bg-indigo-100 text-indigo-800" },
+    darvas_box:        { label: "Darvas Box",           cls: "bg-amber-100 text-amber-800" },
+    turtle_breakout:   { label: "Turtle 20-day",        cls: "bg-lime-100 text-lime-800" },
+    livermore_pivot:   { label: "Livermore Pivot",      cls: "bg-rose-100 text-rose-800" },
+    zanger_breakout:   { label: "Zanger Volume",        cls: "bg-fuchsia-100 text-fuchsia-800" },
+    qullamaggie_ep:    { label: "Episodic Pivot (QM)",  cls: "bg-cyan-100 text-cyan-800" },
   };
   const m = map[s] || { label: s, cls: "bg-slate-100 text-slate-800" };
   return `<span class="text-xs font-semibold px-2 py-1 rounded ${m.cls}">${m.label}</span>`;

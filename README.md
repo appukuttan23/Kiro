@@ -14,17 +14,23 @@ having to pick stocks yourself.
 ## What it does
 
 1. **Scans all 50 Nifty 50 stocks** automatically — you don't pick.
-2. Applies two well-known strategies:
-   - **Minervini-Lite Trend Template** (momentum / trend-following)
-     - Price > 50-day, 150-day, 200-day SMA
-     - 50 SMA > 150 SMA > 200 SMA
-     - 200 SMA trending up
-   - **Kotegawa 25-day Mean Reversion** (buy-the-dip)
-     - Price > 5% below 25-day SMA
-     - RSI(14) < 30
+2. Applies **7 strategies inspired by legendary traders**:
+
+   | Strategy | Inspired by | Type | Looks for |
+   |---|---|---|---|
+   | **Minervini-Lite** | Mark Minervini | Trend | Price above 50/150/200 SMAs, stacked correctly, 200-SMA rising |
+   | **Kotegawa 25-day** | Takashi Kotegawa (BNF) | Mean reversion | Price ≥ 5% below 25-SMA + RSI < 30, in long-term uptrend |
+   | **Darvas Box** | Nicolas Darvas | Breakout | New 52-week high after 20 days in a tight (≤ 8%) box |
+   | **Turtle 20-day** | Richard Dennis (Turtles) | Breakout | Close > prior 20-day high, in confirmed uptrend; 2× ATR stop |
+   | **Livermore Pivot** | Jesse Livermore | Breakout | Break above prior 60-day pivot high on ≥ 1.5× volume |
+   | **Zanger Volume** | Dan Zanger | Breakout | Momentum leader (+30% YoY) breaks tight 2-month base on 2× volume |
+   | **Episodic Pivot** | Kristjan Kullamägi (Qullamaggie) | Catalyst | After +20% in 3 months: 4%+ gap-up that holds, on 2× volume |
+
 3. Shows you **only a handful of candidates per day** (no overwhelm).
-4. Gives a **plain-English reason** for every alert.
+4. Gives a **plain-English reason** (with stop-loss suggestions) for every alert.
 5. Lets you **log paper trades** to practice without real money.
+
+> **Tip:** Different strategies fire in different market conditions. **Trend** and **Breakout** strategies (Minervini, Darvas, Turtle, Livermore, Zanger, Qullamaggie) tend to fire in healthy bull markets. **Mean reversion** (Kotegawa) tends to fire after sharp selloffs. Don't be surprised if a scan returns zero candidates — the best traders sit out most days.
 
 ---
 
@@ -94,7 +100,7 @@ Never lose more than 2% of your total capital on a single trade.
 - [x] **Phase 2** — Telegram bot with inline approval buttons
 - [ ] **Phase 3** — Real order placement via Zerodha Kite Connect (see below)
 - [ ] Daily auto-scan via cron / GitHub Actions
-- [ ] More strategies: Darvas Box, VWAP bounce
+- [ ] More strategies: VWAP bounce, Stan Weinstein Stage 2, Linda Raschke "Holy Grail"
 - [ ] Backtest engine
 
 ---
