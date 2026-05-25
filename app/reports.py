@@ -42,9 +42,11 @@ def build_report(
     signals: list[dict[str, Any]],
     duration_s: float,
     universe_size: int,
+    exit_alerts: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     """Group signals by strategy and rank top picks. Pure function (no I/O)."""
     now = datetime.now(IST)
+    exit_alerts = exit_alerts or []
 
     by_strategy: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for sig in signals:
@@ -66,9 +68,11 @@ def build_report(
         "universe_size": universe_size,
         "duration_seconds": round(duration_s, 1),
         "total_signals": len(signals),
+        "total_exit_alerts": len(exit_alerts),
         "strategy_hit_counts": {k: len(v) for k, v in by_strategy.items()},
         "by_strategy": dict(by_strategy),
         "top_picks": top_picks,
+        "exit_alerts": exit_alerts,
     }
 
 
@@ -137,13 +141,37 @@ def report_to_markdown(report: dict[str, Any]) -> str:
     lines.append(f"- **Universe:** {report['universe_size']} stocks")
     lines.append(f"- **Duration:** {report['duration_seconds']}s")
     lines.append(
-        f"- **Total signals:** {report['total_signals']} across "
+        f"- **New BUY signals:** {report['total_signals']} across "
         f"{len(ALL_STRATEGIES)} strategies"
+    )
+    lines.append(
+        f"- **SELL alerts (open trades):** "
+        f"{report.get('total_exit_alerts', 0)}"
     )
     lines.append("")
 
+    # ---- SELL alerts (most urgent, show first) ----
+    exit_alerts = report.get("exit_alerts", [])
+    if exit_alerts:
+        lines.append("## SELL alerts on your open trades")
+        lines.append("")
+        lines.append("| Ticker | Strategy | Type | Entry | Now | P&L % | Why |")
+        lines.append("|---|---|---|---:|---:|---:|---|")
+        for ex in exit_alerts:
+            label = STRATEGY_LABELS.get(ex["strategy"], ex["strategy"])
+            ticker = ex["ticker"].replace(".NS", "")
+            reason = ex["reason"].replace("\n", " ").replace("|", "/")
+            if len(reason) > 200:
+                reason = reason[:197] + "..."
+            lines.append(
+                f"| {ticker} | {label} | {ex['exit_type']} | "
+                f"Rs.{ex['entry_price']:.2f} | Rs.{ex['current_price']:.2f} | "
+                f"{ex['pnl_pct']:+.1f}% | {reason} |"
+            )
+        lines.append("")
+
     # ---- Hit counts table ----
-    lines.append("## Strategy hit counts")
+    lines.append("## New BUY signals - hit counts")
     lines.append("")
     lines.append("| Strategy | Hits |")
     lines.append("|---|---:|")

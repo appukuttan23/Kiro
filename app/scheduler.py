@@ -30,16 +30,30 @@ log = logging.getLogger(__name__)
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
-# Type alias for the callable we expect from main.py
+# Type aliases for the callables we expect from main.py
 ScanFn = Callable[[], Awaitable[list[dict[str, Any]]]]
+ExitFn = Callable[[], Awaitable[list[dict[str, Any]]]]
 
 
 class ScanScheduler:
-    """Daily scan scheduler with manual 'run now' support."""
+    """Daily scan scheduler with manual 'run now' support.
 
-    def __init__(self, scan_fn: ScanFn, universe_size_fn: Callable[[], int]):
+    Each scheduled run does TWO things:
+      1. Runs all entry strategies across the universe (BUY signals).
+      2. Runs every open paper trade against its strategy's exit rule
+         (SELL alerts).
+    Both are saved together in the same report.
+    """
+
+    def __init__(
+        self,
+        scan_fn: ScanFn,
+        universe_size_fn: Callable[[], int],
+        exit_check_fn: Optional[ExitFn] = None,
+    ):
         self._scan_fn = scan_fn
         self._universe_size_fn = universe_size_fn
+        self._exit_check_fn = exit_check_fn
         self._scheduler = AsyncIOScheduler(timezone=IST)
         self._last_run: Optional[dict[str, Any]] = None
         self._is_running = False
@@ -89,22 +103,33 @@ class ScanScheduler:
             log.info("Background scan starting...")
             t0 = time.perf_counter()
             signals = await self._scan_fn()
+
+            # Run exit-rule checks on every open paper trade
+            exit_alerts: list[dict[str, Any]] = []
+            if self._exit_check_fn is not None:
+                try:
+                    exit_alerts = await self._exit_check_fn()
+                except Exception:  # noqa: BLE001
+                    log.exception("Exit check failed; continuing without exit alerts.")
+
             duration = time.perf_counter() - t0
             report = reports_mod.build_report(
                 signals,
                 duration_s=duration,
                 universe_size=self._universe_size_fn(),
+                exit_alerts=exit_alerts,
             )
             reports_mod.save_report(report)
             self._last_run = {
                 "scan_id": report["scan_id"],
                 "scan_finished": report["scan_finished"],
                 "total_signals": report["total_signals"],
+                "total_exit_alerts": report.get("total_exit_alerts", 0),
                 "duration_seconds": report["duration_seconds"],
             }
             log.info(
-                "Background scan done: %d signals, %.1fs",
-                len(signals), duration,
+                "Background scan done: %d BUY signals, %d SELL alerts, %.1fs",
+                len(signals), len(exit_alerts), duration,
             )
             return report
         finally:

@@ -58,6 +58,11 @@
         <p id="runNowStatus" class="text-xs text-slate-500 mt-2"></p>
       </div>
 
+      <div id="reportsExitsBox" class="hidden mb-6">
+        <h2 class="text-lg font-semibold mb-2 text-rose-700">SELL alerts on your open trades (live)</h2>
+        <div id="reportsExitAlerts" class="space-y-2"></div>
+      </div>
+
       <h2 class="text-lg font-semibold mb-2">Recent reports</h2>
       <div id="reportsList" class="space-y-2"></div>
 
@@ -70,7 +75,15 @@
         <button id="refreshTrades" class="bg-slate-600 hover:bg-slate-700 text-white font-semibold px-4 py-2 rounded">
           Refresh
         </button>
+        <span id="tradesStatus" class="text-slate-500 text-sm"></span>
       </div>
+
+      <div id="exitAlertsBox" class="hidden mb-6">
+        <h2 class="text-lg font-semibold mb-2 text-rose-700">SELL alerts on your open trades</h2>
+        <div id="exitAlerts" class="space-y-2"></div>
+      </div>
+
+      <h2 class="text-lg font-semibold mb-2">All paper trades</h2>
       <div id="trades" class="space-y-2"></div>
     </section>
   </div>
@@ -110,7 +123,7 @@ $$(".tab").forEach(btn => btn.addEventListener("click", () => {
   $("#tab-reports").classList.toggle("hidden", tab !== "reports");
   $("#tab-trades").classList.toggle("hidden", tab !== "trades");
   if (tab === "trades")  loadTrades();
-  if (tab === "reports") { loadSchedulerStatus(); loadReports(); }
+  if (tab === "reports") { loadSchedulerStatus(); loadReports(); loadLiveExits(); }
 }));
 
 // --- notifications ---
@@ -170,6 +183,7 @@ function signalCard(s, withBuyButton) {
         <input type="number" min="1" value="10" data-qty="${s.ticker}-${s.strategy}"
                class="border border-slate-300 rounded px-2 py-1 w-24 text-sm" />
         <button data-buy="${s.ticker}-${s.strategy}" data-ticker="${s.ticker}"
+                data-strategy="${s.strategy}"
                 data-price="${s.price}" data-reason="${encodeURIComponent(s.reason)}"
                 class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-3 py-1 rounded">
           Paper Buy
@@ -182,13 +196,14 @@ async function paperBuyHandler(e) {
   const btn = e.currentTarget;
   const key = btn.dataset.buy;
   const ticker = btn.dataset.ticker;
+  const strategy = btn.dataset.strategy || "";
   const price = parseFloat(btn.dataset.price);
   const reason = decodeURIComponent(btn.dataset.reason);
   const qty = parseInt($(`[data-qty="${key}"]`).value, 10) || 1;
   const res = await fetch("/api/trades", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ticker, action: "BUY", price, qty, reason }),
+    body: JSON.stringify({ ticker, action: "BUY", price, qty, reason, strategy }),
   });
   if (res.ok) {
     btn.textContent = "Logged \u2713";
@@ -198,8 +213,63 @@ async function paperBuyHandler(e) {
   }
 }
 
+// --- SELL alert rendering ---
+const EXIT_TYPE_STYLE = {
+  STOP:        "bg-red-100 text-red-800 border-red-300",
+  TARGET:      "bg-emerald-100 text-emerald-800 border-emerald-300",
+  TIME:        "bg-amber-100 text-amber-800 border-amber-300",
+  TREND_BREAK: "bg-orange-100 text-orange-800 border-orange-300",
+};
+
+function exitAlertCard(ex) {
+  const style = EXIT_TYPE_STYLE[ex.exit_type] || "bg-slate-100 text-slate-800 border-slate-300";
+  const ticker = ex.ticker.replace(".NS", "");
+  const pnlCls = ex.pnl_pct >= 0 ? "text-emerald-700" : "text-red-700";
+  return `
+    <div class="bg-white border ${style.split(" ").pop()} rounded-lg p-4 shadow-sm">
+      <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-lg font-bold">${ticker}</span>
+          ${strategyBadge(ex.strategy)}
+          <span class="text-xs font-semibold px-2 py-1 rounded ${style}">SELL - ${ex.exit_type}</span>
+        </div>
+        <div class="text-right text-sm">
+          <div>Entry &#8377;${Number(ex.entry_price).toFixed(2)} &rarr; Now &#8377;${Number(ex.current_price).toFixed(2)}</div>
+          <div class="font-semibold ${pnlCls}">P&amp;L: ${ex.pnl_pct >= 0 ? "+" : ""}${ex.pnl_pct.toFixed(2)}%</div>
+        </div>
+      </div>
+      <p class="text-sm text-slate-700 mb-3">${ex.reason}</p>
+      <button data-close-exit="${ex.trade_id}" data-price="${ex.current_price}"
+              class="bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold px-3 py-1 rounded">
+        Close paper trade @ &#8377;${Number(ex.current_price).toFixed(2)}
+      </button>
+    </div>`;
+}
+
+async function attachExitCloseHandlers(rootSelector) {
+  const root = $(rootSelector);
+  if (!root) return;
+  root.querySelectorAll("[data-close-exit]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.closeExit;
+      const px = parseFloat(btn.dataset.price);
+      const res = await fetch(`/api/trades/${id}/close`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ exit_price: px }),
+      });
+      if (res.ok) {
+        btn.textContent = "Closed \u2713";
+        btn.disabled = true;
+        btn.classList.remove("bg-rose-600", "hover:bg-rose-700");
+        btn.classList.add("bg-slate-400");
+      }
+    });
+  });
+}
+
 // --- Reports tab ---
-$("#refreshSchedBtn").addEventListener("click", () => { loadSchedulerStatus(); loadReports(); });
+$("#refreshSchedBtn").addEventListener("click", () => { loadSchedulerStatus(); loadReports(); loadLiveExits(); });
 $("#runNowBtn").addEventListener("click", async () => {
   $("#runNowStatus").textContent = "Running scan in background... ~30s.";
   $("#runNowBtn").disabled = true;
@@ -210,12 +280,16 @@ $("#runNowBtn").addEventListener("click", async () => {
     } else {
       const report = await res.json();
       $("#runNowStatus").textContent =
-        `Scan complete. ${report.total_signals} signal(s) saved as ${report.scan_id}.`;
-      if (report.total_signals > 0) {
-        notify("Scan complete", `${report.total_signals} candidate(s) saved to report ${report.scan_id}.`);
+        `Scan complete. ${report.total_signals} BUY signal(s), ` +
+        `${report.total_exit_alerts || 0} SELL alert(s). Saved as ${report.scan_id}.`;
+      const totalAlerts = (report.total_signals || 0) + (report.total_exit_alerts || 0);
+      if (totalAlerts > 0) {
+        notify("Scan complete",
+          `${report.total_signals || 0} BUY + ${report.total_exit_alerts || 0} SELL alert(s).`);
       }
       loadReports();
       loadSchedulerStatus();
+      loadLiveExits();
       showReportDetail(report);
     }
   } catch (e) {
@@ -224,6 +298,25 @@ $("#runNowBtn").addEventListener("click", async () => {
     $("#runNowBtn").disabled = false;
   }
 });
+
+async function loadLiveExits() {
+  try {
+    const res = await fetch("/api/exits");
+    const data = await res.json();
+    const box = $("#reportsExitsBox");
+    const el = $("#reportsExitAlerts");
+    if (data.alerts && data.alerts.length) {
+      box.classList.remove("hidden");
+      el.innerHTML = data.alerts.map(exitAlertCard).join("");
+      attachExitCloseHandlers("#reportsExitsBox");
+    } else {
+      box.classList.add("hidden");
+      el.innerHTML = "";
+    }
+  } catch (e) {
+    // Silently ignore - the rest of the tab still works.
+  }
+}
 
 async function loadSchedulerStatus() {
   try {
@@ -311,6 +404,7 @@ function showReportDetail(report) {
   }).join("");
 
   const top = (report.top_picks || []).map(s => signalCard(s, false)).join("");
+  const exits = (report.exit_alerts || []).map(exitAlertCard).join("");
 
   el.innerHTML = `
     <div class="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
@@ -321,10 +415,14 @@ function showReportDetail(report) {
       <p class="text-sm text-slate-600 mb-4">
         Finished ${new Date(report.scan_finished).toLocaleString()}.
         Scanned ${report.universe_size} stocks in ${report.duration_seconds}s.
-        Found <strong>${report.total_signals}</strong> signal(s) across ${Object.keys(STRATEGY_MAP).length} strategies.
+        <strong>${report.total_signals}</strong> new BUY signal(s),
+        <strong class="${(report.total_exit_alerts || 0) > 0 ? 'text-rose-700' : ''}">${report.total_exit_alerts || 0}</strong> SELL alert(s) on open trades.
       </p>
+      ${exits ? `
+        <h4 class="font-semibold mb-2 text-rose-700">SELL alerts on your open trades</h4>
+        <div class="space-y-2 mb-6">${exits}</div>` : ""}
       ${report.top_picks && report.top_picks.length ? `
-        <h4 class="font-semibold mb-2">Top picks (by score)</h4>
+        <h4 class="font-semibold mb-2">Top BUY picks (by score)</h4>
         <div class="space-y-2 mb-6">${top}</div>` : ""}
       <h4 class="font-semibold mb-2">By strategy</h4>
       <div class="space-y-2">${sections}</div>
@@ -332,6 +430,7 @@ function showReportDetail(report) {
 
   $("#closeReport").addEventListener("click", () => el.classList.add("hidden"));
   $$("[data-buy]").forEach(btn => btn.addEventListener("click", paperBuyHandler));
+  attachExitCloseHandlers("#reportDetail");
   el.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -339,8 +438,28 @@ function showReportDetail(report) {
 $("#refreshTrades").addEventListener("click", loadTrades);
 
 async function loadTrades() {
-  const res = await fetch("/api/trades");
-  const data = await res.json();
+  // Load both the trade log AND fresh exit alerts in parallel
+  $("#tradesStatus").textContent = "Refreshing...";
+  const [tradesRes, exitsRes] = await Promise.all([
+    fetch("/api/trades"),
+    fetch("/api/exits"),
+  ]);
+  const data = await tradesRes.json();
+  const exits = await exitsRes.json();
+  $("#tradesStatus").textContent = "";
+
+  // Render exit alerts panel
+  const exitsBox = $("#exitAlertsBox");
+  const exitsEl = $("#exitAlerts");
+  if (exits.alerts && exits.alerts.length) {
+    exitsBox.classList.remove("hidden");
+    exitsEl.innerHTML = exits.alerts.map(exitAlertCard).join("");
+    attachExitCloseHandlers("#exitAlertsBox");
+  } else {
+    exitsBox.classList.add("hidden");
+    exitsEl.innerHTML = "";
+  }
+
   if (!data.trades.length) {
     $("#trades").innerHTML = `<div class="text-slate-500 italic">No paper trades yet. Run a scan and paper-buy a candidate.</div>`;
     return;

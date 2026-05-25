@@ -34,7 +34,14 @@ def list_trades() -> list[dict[str, Any]]:
         return _load()
 
 
-def add_trade(ticker: str, action: str, price: float, qty: int, reason: str) -> dict[str, Any]:
+def add_trade(
+    ticker: str,
+    action: str,
+    price: float,
+    qty: int,
+    reason: str,
+    strategy: str = "",
+) -> dict[str, Any]:
     trade = {
         "id": str(uuid.uuid4())[:8],
         "ticker": ticker,
@@ -43,6 +50,7 @@ def add_trade(ticker: str, action: str, price: float, qty: int, reason: str) -> 
         "qty": int(qty),
         "value": round(float(price) * int(qty), 2),
         "reason": reason,
+        "strategy": strategy,           # which strategy triggered this entry
         "ts": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         "status": "OPEN" if action.upper() == "BUY" else "CLOSED",
     }
@@ -51,6 +59,17 @@ def add_trade(ticker: str, action: str, price: float, qty: int, reason: str) -> 
         items.append(trade)
         _save(items)
     return trade
+
+
+def list_open_trades() -> list[dict[str, Any]]:
+    return [t for t in list_trades() if t.get("status") == "OPEN"]
+
+
+def get_trade(trade_id: str) -> dict[str, Any] | None:
+    for t in list_trades():
+        if t["id"] == trade_id:
+            return t
+    return None
 
 
 def close_trade(trade_id: str, exit_price: float) -> dict[str, Any] | None:
